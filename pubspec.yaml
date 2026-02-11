@@ -1,0 +1,49 @@
+name: esp
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  http: ^1.2.1
+  flutter_native_splash: ^2.0.0
+  flutter_launcher_icons: ^0.13.1
+  permission_handler: ^11.3.0
+  flutter_bluetooth_serial: ^0.4.0 # ✅ Classic SPP for your ESP32
+  animate_do: ^2.0.0
+  shared_preferences: ^2.2.2
+  location: ^5.0.3
+  intl: ^0.19.0
+  wifi_scan: ^0.4.1+2 # ✅ for scanning WiFi SSIDs
+  mqtt_client: ^10.8.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    
+
+
+flutter_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icon/icon1.png"
+  min_sdk_android: 21
+  web:
+    generate: true
+    image_path: "assets/icon/icon1.png"
+    background_color: "#hexcode"
+    theme_color: "#hexcode"
+  windows:
+    generate: true
+    image_path: "assets/icon/icon1.png"
+    icon_size: 48

@@ -8,6 +8,9 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'bluetooth_scanner_page.dart';
+import 'widgets/ac_control_widget.dart';
+import 'widgets/temperature_widget.dart';
+import 'widgets/wifi_section_widget.dart';
 
 class ConfigurationPage extends StatefulWidget {
   final BluetoothConnection connection;
@@ -91,6 +94,10 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   bool _isWifiConnected = false;
   bool _isGreenLedOn = false;
   bool _isYellowLedOn = false;
+  bool _isBluetoothOn = false;
+  String _lastDisconnectReason = "N/A";
+  String _lastDisconnectTime = "N/A";
+  Timer? _bluetoothStateTimer;
 
   // ====== WiFi Info ======
   String _wifiIP = "";
@@ -167,10 +174,12 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
 
     _loadSavedState();
     _listenBluetooth();
+    _startBluetoothStateMonitor();
   }
 
   @override
   void dispose() {
+    _bluetoothStateTimer?.cancel();
     _ssidController.dispose();
     _wifiPasswordController.dispose();
 
@@ -270,6 +279,56 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     } catch (_) {}
   }
 
+  void _startBluetoothStateMonitor() {
+    _updateBluetoothState();
+    _bluetoothStateTimer?.cancel();
+    _bluetoothStateTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => _updateBluetoothState(),
+    );
+  }
+
+  Future<void> _updateBluetoothState() async {
+    try {
+      final isEnabled = await FlutterBluetoothSerial.instance.isEnabled;
+      if (!mounted) return;
+      setState(() => _isBluetoothOn = isEnabled ?? false);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isBluetoothOn = false);
+    }
+  }
+
+  void _recordDisconnect(String reason) {
+    final time = DateFormat("yyyy-MM-dd HH:mm:ss").format(DateTime.now());
+    setState(() {
+      _isConnected = false;
+      _isYellowLedOn = false;
+      _lastDisconnectReason = reason;
+      _lastDisconnectTime = time;
+    });
+    _log("BT disconnected: $reason @ $time");
+    _showSnack("Bluetooth disconnected", _red);
+  }
+
+  String _disconnectHint(String reason) {
+    final r = reason.toLowerCase();
+    if (r.contains("remote")) {
+      return "Device closed the link (idle timeout or reboot)";
+    }
+    if (r.contains("error")) {
+      return "Bluetooth stack error (signal or OS)";
+    }
+    return "Unknown cause";
+  }
+
+  String _disconnectDisplayReason(String reason) {
+    if (reason.toLowerCase().contains("remote")) {
+      return "Device closed the connection";
+    }
+    return reason;
+  }
+
   // ===================== BT Rx =====================
   void _listenBluetooth() {
     _connection.input?.listen((Uint8List data) {
@@ -281,12 +340,12 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       while ((line = _extractLine()) != "") {
         _handleLine(line.trim());
       }
+    }, onError: (error) {
+      if (!mounted) return;
+      _recordDisconnect("Error: $error");
     }).onDone(() {
-      setState(() {
-        _isConnected = false;
-        _isYellowLedOn = false;
-      });
-      _showSnack("Bluetooth disconnected", _red);
+      if (!mounted) return;
+      _recordDisconnect("Disconnected by remote");
     });
   }
 
@@ -713,7 +772,32 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
           children: [
             Icon(_isConnected ? Icons.bluetooth_connected : Icons.bluetooth_disabled, color: _isConnected ? _blue : _red),
             const SizedBox(width: 10),
-            Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800))),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 4),
+                  Text(
+                    "Mobile Bluetooth: ${_isBluetoothOn ? 'ON' : 'OFF'}",
+                    style: TextStyle(fontSize: 12, color: _isBluetoothOn ? _green : _red),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    "Last disconnect: $_lastDisconnectTime",
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  Text(
+                    "Reason: ${_disconnectDisplayReason(_lastDisconnectReason)}",
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  Text(
+                    "Hint: ${_disconnectHint(_lastDisconnectReason)}",
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -730,458 +814,6 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
                 ]),
               ],
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildWifiCard() {
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.wifi, color: _themeGreen),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _wifiStatus,
-                    style: TextStyle(fontWeight: FontWeight.w800, color: _isWifiConnected ? _green : _red),
-                  ),
-                  if (_wifiIP.isNotEmpty) Text(_wifiIP, style: const TextStyle(fontSize: 12)),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      ElevatedButton.icon(
-                        onPressed: _showWifiSetupDialog,
-                        icon: const Icon(Icons.settings, size: 16),
-                        label: const Text("WiFi Setup"),
-                        style: ElevatedButton.styleFrom(backgroundColor: _themeGreen, foregroundColor: Colors.black),
-                      ),
-                      if (_isWifiConnected)
-                        OutlinedButton.icon(
-                          onPressed: () => setState(() => _showMqttDropdown = !_showMqttDropdown),
-                          icon: Icon(_showMqttDropdown ? Icons.expand_less : Icons.expand_more, size: 16),
-                          label: Text(_showMqttDropdown ? "Hide MQTT" : "Show MQTT"),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMqttDropdownCard() {
-    if (!_isWifiConnected) return const SizedBox.shrink();
-    if (!_showMqttDropdown) return const SizedBox.shrink();
-
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Expanded(child: Text("MQTT Settings", style: TextStyle(fontWeight: FontWeight.w900))),
-                Chip(
-                  label: Text(_mqttStatus, style: const TextStyle(fontSize: 12)),
-                  backgroundColor: _isMqttConnected ? Colors.green.shade100 : Colors.red.shade100,
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            _field("Host / IP", _mqttHostController),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(child: _field("Port", _mqttPortController, keyboard: TextInputType.number)),
-                const SizedBox(width: 10),
-                Expanded(child: _field("Topic", _mqttTopicController)),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(child: _field("Username", _mqttUserController)),
-                const SizedBox(width: 10),
-                Expanded(child: _field("Password", _mqttPassController, obscure: true)),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ElevatedButton.icon(
-                  onPressed: () => _sendMqttSettingsToDevice(connect: false),
-                  icon: const Icon(Icons.save, size: 16),
-                  label: const Text("Save & Send"),
-                  style: ElevatedButton.styleFrom(backgroundColor: _themeGreen, foregroundColor: Colors.black),
-                ),
-                ElevatedButton.icon(
-                  onPressed: () => _sendMqttSettingsToDevice(connect: true),
-                  icon: const Icon(Icons.cloud_done, size: 16),
-                  label: const Text("Connect MQTT"),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-                ),
-              ],
-            ),
-            const Divider(height: 22),
-            Row(
-              children: [
-                const Expanded(child: Text("Auto Control", style: TextStyle(fontWeight: FontWeight.w900))),
-                Switch(
-                  value: _autoControlEnabled,
-                  onChanged: (v) async {
-                    setState(() => _autoControlEnabled = v);
-                    await _saveAutoPrefs();
-                    await _sendAutoSetpointsToDevice();
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(child: _field("Auto ON Temp (°C)", _autoOnController, keyboard: TextInputType.number)),
-                const SizedBox(width: 10),
-                Expanded(child: _field("Auto OFF Temp (°C)", _autoOffController, keyboard: TextInputType.number)),
-              ],
-            ),
-            const SizedBox(height: 10),
-            ElevatedButton.icon(
-              onPressed: _sendAutoSetpointsToDevice,
-              icon: const Icon(Icons.tune, size: 16),
-              label: const Text("Apply Auto Config"),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _field(
-    String label,
-    TextEditingController c, {
-    TextInputType keyboard = TextInputType.text,
-    bool obscure = false,
-  }) {
-    return TextField(
-      controller: c,
-      keyboardType: keyboard,
-      obscureText: obscure,
-      decoration: const InputDecoration(
-        border: OutlineInputBorder(),
-        isDense: true,
-      ).copyWith(labelText: label),
-    );
-  }
-
-  Widget _buildTempRtcCard() {
-    final sub = TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w700);
-
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.thermostat, color: Colors.orange),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text("Room Temp", style: sub),
-                      const SizedBox(height: 2),
-                      Text(_temperatureText, style: const TextStyle(fontWeight: FontWeight.w800)),
-                    ],
-                  ),
-                ),
-                IconButton(icon: const Icon(Icons.refresh), onPressed: () => _sendCommand("GET_TEMP")),
-              ],
-            ),
-            const Divider(height: 18),
-            Row(
-              children: [
-                Icon(Icons.access_time, color: _blue),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text("Device RTC", style: sub),
-                      const SizedBox(height: 2),
-                      Text(_deviceTimeText, style: const TextStyle(fontWeight: FontWeight.w800)),
-                    ],
-                  ),
-                ),
-                IconButton(icon: const Icon(Icons.schedule), onPressed: () => _sendCommand("GET_TIME")),
-                IconButton(
-                  icon: const Icon(Icons.sync),
-                  onPressed: () {
-                    final now = DateTime.now();
-                    final formatted = DateFormat('yyyy-MM-dd HH:mm:ss').format(now);
-                    setState(() => _deviceTimeText = formatted);
-                    _sendCommand("SET_TIME:$formatted");
-                    Future.delayed(const Duration(milliseconds: 500), () {
-                      if (mounted) _sendCommand("GET_TIME");
-                    });
-                  },
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ===================== DEFAULT REMOTE DROPDOWN =====================
-  Widget _buildDefaultRemoteDropdown() {
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    "Default AC Remote",
-                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => setState(() => _showDefaultRemoteDropdown = !_showDefaultRemoteDropdown),
-                  icon: Icon(_showDefaultRemoteDropdown ? Icons.expand_less : Icons.expand_more),
-                ),
-              ],
-            ),
-            if (_showDefaultRemoteDropdown) ...[
-              const SizedBox(height: 10),
-
-              // brand selector for default sending
-              DropdownButtonFormField<String>(
-                value: _brandDropdownItems().contains(_defaultRemoteBrand) ? _defaultRemoteBrand : "Samsung",
-                items: _brandDropdownItems().map((b) => DropdownMenuItem(value: b, child: Text(b))).toList(),
-                onChanged: (v) {
-                  if (v == null) return;
-                  _setDefaultBrandOnDevice(v);
-                },
-                decoration: const InputDecoration(
-                  labelText: "Brand",
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  _remoteBtn("POWER ON", Icons.power_settings_new, () => _sendDefaultRemoteKey("POWER_ON")),
-                  _remoteBtn("TEMP +", Icons.arrow_upward, () => _sendDefaultRemoteKey("TEMPUP")),
-                  _remoteBtn("TEMP -", Icons.arrow_downward, () => _sendDefaultRemoteKey("TEMPDOWN")),
-                  _remoteBtn("SWING", Icons.swap_horiz, () => _sendDefaultRemoteKey("SWING")),
-                  _remoteBtn("MODE", Icons.tune, () => _sendDefaultRemoteKey("MODE")),
-                  _remoteBtn("POWER OFF", Icons.power_off, () => _sendDefaultRemoteKey("POWER_OFF")),
-                ],
-              ),
-
-              const SizedBox(height: 14),
-
-              // schedules (optional)
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _onTimeController,
-                      readOnly: true,
-                      decoration: const InputDecoration(
-                        labelText: "ON Time (HH:MM)",
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      onTap: () => _pickTime(_onTimeController, "SCHEDULE_ON"),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: _offTimeController,
-                      readOnly: true,
-                      decoration: const InputDecoration(
-                        labelText: "OFF Time (HH:MM)",
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      onTap: () => _pickTime(_offTimeController, "SCHEDULE_OFF"),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ===================== REMOTE CONFIG DROPDOWN =====================
-  Widget _buildRemoteConfigDropdown() {
-    final currentKey = _cfgKeys[_cfgStepIndex];
-
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    "Remote Configuration",
-                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => setState(() => _showRemoteConfigDropdown = !_showRemoteConfigDropdown),
-                  icon: Icon(_showRemoteConfigDropdown ? Icons.expand_less : Icons.expand_more),
-                ),
-              ],
-            ),
-            if (_showRemoteConfigDropdown) ...[
-              const SizedBox(height: 10),
-
-              DropdownButtonFormField<String>(
-                value: _brandDropdownItems().contains(_configBrand) ? _configBrand : "LG",
-                items: _brandDropdownItems().map((b) => DropdownMenuItem(value: b, child: Text(b))).toList(),
-                onChanged: (v) {
-                  if (v == null) return;
-                  _setConfigBrandOnDevice(v);
-                },
-                decoration: const InputDecoration(
-                  labelText: "Brand to Learn",
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _configMode ? null : _startConfigMode,
-                      icon: const Icon(Icons.play_arrow),
-                      label: const Text("Start Config"),
-                      style: ElevatedButton.styleFrom(backgroundColor: _themeGreen, foregroundColor: Colors.black),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: (!_configMode || _waitingForIr) ? null : _triggerCurrentKeyConfig,
-                      icon: const Icon(Icons.wifi_tethering),
-                      label: Text("Config $currentKey"),
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 12),
-
-              // Step indicator
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  "Step ${_cfgStepIndex + 1}/${_cfgKeys.length}  →  $currentKey",
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-              const SizedBox(height: 6),
-
-              // progress
-              LinearProgressIndicator(
-                value: (_learningProgress / 100.0).clamp(0.0, 1.0),
-                minHeight: 8,
-              ),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  _cfgStatus,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: _waitingForIr ? Colors.orange : Colors.black,
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              // Save button (enabled only after last step done message sets status)
-              ElevatedButton.icon(
-                onPressed: (_configMode == false && _cfgStatus.contains("All keys captured"))
-                    ? _showSaveRemoteDialog
-                    : (_cfgStatus.contains("All keys captured") ? _showSaveRemoteDialog : null),
-                icon: const Icon(Icons.save),
-                label: const Text("Save Remote"),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _remoteBtn(String label, IconData icon, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        width: 110,
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(color: _themeGreen, borderRadius: BorderRadius.circular(14)),
-        child: Column(
-          children: [
-            Icon(icon, color: Colors.black),
-            const SizedBox(height: 6),
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
           ],
         ),
       ),
@@ -1269,13 +901,83 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         child: Column(
           children: [
             _buildStatusCard(),
-            _buildWifiCard(),
-            _buildMqttDropdownCard(),
-            _buildTempRtcCard(),
-
-            // ✅ both required dropdowns
-            _buildRemoteConfigDropdown(), // remote learning
-            _buildDefaultRemoteDropdown(), // default remote control
+            WifiSectionWidget(
+              themeGreen: _themeGreen,
+              isWifiConnected: _isWifiConnected,
+              wifiStatus: _wifiStatus,
+              wifiIP: _wifiIP,
+              onShowWifiSetup: _showWifiSetupDialog,
+              showMqttDropdown: _showMqttDropdown,
+              onToggleMqttDropdown: () => setState(() => _showMqttDropdown = !_showMqttDropdown),
+              mqttStatus: _mqttStatus,
+              isMqttConnected: _isMqttConnected,
+              mqttHostController: _mqttHostController,
+              mqttPortController: _mqttPortController,
+              mqttTopicController: _mqttTopicController,
+              mqttUserController: _mqttUserController,
+              mqttPassController: _mqttPassController,
+              onSendMqttSettings: () => _sendMqttSettingsToDevice(connect: false),
+              onConnectMqtt: () => _sendMqttSettingsToDevice(connect: true),
+              autoControlEnabled: _autoControlEnabled,
+              onAutoControlChanged: (v) async {
+                setState(() => _autoControlEnabled = v);
+                await _saveAutoPrefs();
+                await _sendAutoSetpointsToDevice();
+              },
+              autoOnController: _autoOnController,
+              autoOffController: _autoOffController,
+              onApplyAutoConfig: _sendAutoSetpointsToDevice,
+            ),
+            TemperatureWidget(
+              temperatureText: _temperatureText,
+              deviceTimeText: _deviceTimeText,
+              onRefreshTemp: () => _sendCommand("GET_TEMP"),
+              onRefreshTime: () => _sendCommand("GET_TIME"),
+              onSyncTime: () {
+                final now = DateTime.now();
+                final formatted = DateFormat('yyyy-MM-dd HH:mm:ss').format(now);
+                setState(() => _deviceTimeText = formatted);
+                _sendCommand("SET_TIME:$formatted");
+                Future.delayed(const Duration(milliseconds: 500), () {
+                  if (mounted) _sendCommand("GET_TIME");
+                });
+              },
+            ),
+            ACControlWidget(
+              themeGreen: _themeGreen,
+              brandItems: _brandDropdownItems(),
+              showDefaultRemoteDropdown: _showDefaultRemoteDropdown,
+              onToggleDefaultRemoteDropdown: () =>
+                  setState(() => _showDefaultRemoteDropdown = !_showDefaultRemoteDropdown),
+              defaultRemoteBrand: _defaultRemoteBrand,
+              onDefaultBrandChanged: _setDefaultBrandOnDevice,
+              onPowerOn: () => _sendDefaultRemoteKey("POWER_ON"),
+              onPowerOff: () => _sendDefaultRemoteKey("POWER_OFF"),
+              onTempUp: () => _sendDefaultRemoteKey("TEMPUP"),
+              onTempDown: () => _sendDefaultRemoteKey("TEMPDOWN"),
+              onSwing: () => _sendDefaultRemoteKey("SWING"),
+              onMode: () => _sendDefaultRemoteKey("MODE"),
+              onTimeController: _onTimeController,
+              offTimeController: _offTimeController,
+              onPickOnTime: () => _pickTime(_onTimeController, "SCHEDULE_ON"),
+              onPickOffTime: () => _pickTime(_offTimeController, "SCHEDULE_OFF"),
+              showRemoteConfigDropdown: _showRemoteConfigDropdown,
+              onToggleRemoteConfigDropdown: () =>
+                  setState(() => _showRemoteConfigDropdown = !_showRemoteConfigDropdown),
+              configBrand: _configBrand,
+              onConfigBrandChanged: _setConfigBrandOnDevice,
+              configMode: _configMode,
+              waitingForIr: _waitingForIr,
+              cfgStepIndex: _cfgStepIndex,
+              cfgStepsCount: _cfgKeys.length,
+              learningProgress: _learningProgress,
+              cfgStatus: _cfgStatus,
+              currentCfgKey: _cfgKeys[_cfgStepIndex],
+              onStartConfigMode: _startConfigMode,
+              onTriggerCurrentKeyConfig: _triggerCurrentKeyConfig,
+              onShowSaveRemoteDialog: _showSaveRemoteDialog,
+              canSaveRemote: _cfgStatus.contains("All keys captured"),
+            ),
 
             _buildTerminal(),
             const SizedBox(height: 16),

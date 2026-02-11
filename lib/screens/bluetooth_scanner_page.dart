@@ -16,6 +16,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
   bool _isScanning = false;
   final List<BluetoothDiscoveryResult> _devices = [];
   StreamSubscription<BluetoothDiscoveryResult>? _streamSubscription;
+  bool _showIRBlasterOnly = true;
 
   Color get _themeGreen => const Color(0xFFC8E6C9);
 
@@ -41,7 +42,8 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
     if (!allGranted && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("❌ Bluetooth permissions are required to scan devices."),
+          content:
+              Text("❌ Bluetooth permissions are required to scan devices."),
           backgroundColor: Colors.red,
         ),
       );
@@ -128,10 +130,143 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
     });
   }
 
+  void _showLoadingDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Center(
+        child: Container(
+          padding: const EdgeInsets.all(30),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.2),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  _themeGreen.withOpacity(0.8),
+                ),
+                strokeWidth: 3,
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                "Connecting...",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _hideLoadingDialog() {
+    if (mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+  }
+
+  void _showInvalidDeviceDialog(BluetoothDevice device) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded,
+                color: Colors.orange.shade700, size: 28),
+            const SizedBox(width: 12),
+            const Text(
+              "Invalid Device",
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "\"${device.name ?? device.address}\" is not a Sustainabyte IR Blaster device.",
+              style: const TextStyle(fontSize: 15),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.shade200),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.orange, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Only Sustainabyte devices are supported.",
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.orange.shade700,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+            child: const Text(
+              "OK",
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _connectToDevice(BluetoothDevice device) async {
+    // Check if device is a Sustainabyte IR Blaster
+    if (!_isIRBlaster(device.name ?? '')) {
+      _showInvalidDeviceDialog(device);
+      return;
+    }
+
+    _showLoadingDialog();
+
     try {
       final connection = await BluetoothConnection.toAddress(device.address);
       if (connection.isConnected && mounted) {
+        _hideLoadingDialog();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text("Connected to ${device.name ?? device.address}"),
@@ -150,6 +285,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
       }
     } catch (e) {
       if (mounted) {
+        _hideLoadingDialog();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -167,6 +303,23 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
   void dispose() {
     _streamSubscription?.cancel();
     super.dispose();
+  }
+
+  bool _isIRBlaster(String deviceName) {
+    final lowerName = deviceName.toLowerCase();
+    return lowerName.contains('sustainabyte') ||
+        lowerName.contains('ir blaster') ||
+        lowerName.contains('ir-blaster') ||
+        lowerName.contains('irblaster');
+  }
+
+  List<BluetoothDiscoveryResult> get _filteredDevices {
+    if (!_showIRBlasterOnly) return _devices;
+    return _devices
+        .where((result) =>
+            _isIRBlaster(result.device.name ?? '') ||
+            _isIRBlaster(result.device.address))
+        .toList();
   }
 
   Widget _buildDeviceTile(BluetoothDiscoveryResult result) {
@@ -204,8 +357,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
           style: ElevatedButton.styleFrom(
             backgroundColor: _themeGreen,
             foregroundColor: Colors.black,
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
             ),
@@ -284,31 +436,79 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
           // Scan button
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _isScanning ? null : _startScan,
-                    icon: const Icon(Icons.search),
-                    label: Text(
-                      _isScanning ? "Scanning..." : "Scan Devices",
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _themeGreen,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      textStyle: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
+            child: ElevatedButton.icon(
+              onPressed: _isScanning ? null : _startScan,
+              icon: const Icon(Icons.search),
+              label: Text(
+                _isScanning ? "Scanning..." : "Scan Devices",
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _themeGreen,
+                foregroundColor: Colors.black,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
-              ],
+                textStyle: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          // Filter toggle
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: InkWell(
+              onTap: () {
+                setState(() {
+                  _showIRBlasterOnly = !_showIRBlasterOnly;
+                });
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: _showIRBlasterOnly
+                            ? const Color(0xFF5E35B1)
+                            : Colors.white,
+                        border: Border.all(
+                          color: _showIRBlasterOnly
+                              ? const Color(0xFF5E35B1)
+                              : Colors.grey.shade400,
+                          width: 2,
+                        ),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: _showIRBlasterOnly
+                          ? const Icon(
+                              Icons.check,
+                              size: 18,
+                              color: Colors.white,
+                            )
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    const Text(
+                      "Sustainabyte Devices Only",
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
 
@@ -324,17 +524,19 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
 
           // Devices list
           Expanded(
-            child: _devices.isNotEmpty
+            child: _filteredDevices.isNotEmpty
                 ? ListView.builder(
-                    itemCount: _devices.length,
+                    itemCount: _filteredDevices.length,
                     itemBuilder: (context, index) =>
-                        _buildDeviceTile(_devices[index]),
+                        _buildDeviceTile(_filteredDevices[index]),
                   )
                 : Center(
                     child: Text(
                       _isScanning
                           ? "Scanning for Bluetooth devices..."
-                          : "No devices found.\nTap 'Scan Devices' to search again.",
+                          : _showIRBlasterOnly
+                              ? "No Sustainabyte devices found.\nUncheck the filter to see all devices."
+                              : "No devices found.\nTap 'Scan Devices' to search again.",
                       textAlign: TextAlign.center,
                       style: const TextStyle(fontSize: 14),
                     ),

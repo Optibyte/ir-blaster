@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:esp/screens/login_page.dart';
 import 'package:esp/screens/mode_selection_page.dart';
 import 'package:esp/auth/auth_service.dart';
-
 void main() {
   runApp(const MyApp());
 }

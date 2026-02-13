@@ -21,9 +21,9 @@ class FanSpeedWidget extends StatelessWidget {
         decoration: BoxDecoration(color: themeGreen, borderRadius: BorderRadius.circular(14)),
         child: Column(
           children: [
-            const Icon(Icons.swap_horiz, color: Colors.black),
+            const Icon(Icons.swap_horiz, color: Colors.white),
             const SizedBox(height: 6),
-            const Text('SWING', style: TextStyle(fontWeight: FontWeight.w800)),
+            const Text('SWING', style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white)),
           ],
         ),
       ),

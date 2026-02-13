@@ -18,7 +18,9 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
   StreamSubscription<BluetoothDiscoveryResult>? _streamSubscription;
   bool _showIRBlasterOnly = true;
 
-  Color get _themeGreen => const Color(0xFFC8E6C9);
+  static const Color _themeGreen = Color.fromARGB(255, 123, 159, 71);
+  static const Color _background = Color(0xFF1A1A2E);
+  static const Color _cardBackground = Color(0xFF2D2D44);
 
   @override
   void initState() {
@@ -136,37 +138,30 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
       barrierDismissible: false,
       builder: (context) => Center(
         child: Container(
-          padding: const EdgeInsets.all(30),
+          width: 100,
+          height: 100,
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: _cardBackground,
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.2),
+                color: Colors.black.withOpacity(0.4),
+                blurRadius: 30,
+                offset: const Offset(0, 15),
+              ),
+              BoxShadow(
+                color: _themeGreen.withOpacity(0.15),
                 blurRadius: 20,
-                offset: const Offset(0, 10),
+                offset: const Offset(0, 0),
               ),
             ],
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  _themeGreen.withOpacity(0.8),
-                ),
-                strokeWidth: 3,
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                "Connecting...",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black87,
-                ),
-              ),
-            ],
+          child: Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(_themeGreen),
+              strokeWidth: 4.5,
+              strokeCap: StrokeCap.round,
+            ),
           ),
         ),
       ),
@@ -183,6 +178,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: _cardBackground,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
         ),
@@ -196,6 +192,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
+                color: Colors.white,
               ),
             ),
           ],
@@ -206,15 +203,15 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
           children: [
             Text(
               "\"${device.name ?? device.address}\" is not a Sustainabyte IR Blaster device.",
-              style: const TextStyle(fontSize: 15),
+              style: const TextStyle(fontSize: 15, color: Colors.white70),
             ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.orange.shade50,
+                color: Colors.orange.shade900.withOpacity(0.3),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.shade200),
+                border: Border.all(color: Colors.orange.shade700),
               ),
               child: const Row(
                 children: [
@@ -226,6 +223,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
+                        color: Colors.white,
                       ),
                     ),
                   ),
@@ -238,7 +236,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
           TextButton(
             onPressed: () => Navigator.pop(context),
             style: TextButton.styleFrom(
-              foregroundColor: Colors.orange.shade700,
+              foregroundColor: Colors.orange.shade400,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             ),
             child: const Text(
@@ -270,7 +268,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text("Connected to ${device.name ?? device.address}"),
-            backgroundColor: Colors.green,
+            backgroundColor: _themeGreen,
           ),
         );
         Navigator.pushReplacement(
@@ -328,6 +326,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
     final name = device.name ?? "Unknown Device";
 
     return Card(
+      color: _cardBackground,
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       elevation: 2,
@@ -340,23 +339,23 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
           padding: const EdgeInsets.all(8),
           child: const Icon(
             Icons.bluetooth,
-            color: Colors.black87,
+            color: Colors.white,
           ),
         ),
         title: Text(
           name,
-          style: const TextStyle(fontWeight: FontWeight.bold),
+          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
         ),
         subtitle: Text(
           "${device.address}\nRSSI: $rssi dBm",
-          style: const TextStyle(fontSize: 12),
+          style: const TextStyle(fontSize: 12, color: Colors.white70),
         ),
         isThreeLine: true,
         trailing: ElevatedButton(
           onPressed: () => _connectToDevice(device),
           style: ElevatedButton.styleFrom(
             backgroundColor: _themeGreen,
-            foregroundColor: Colors.black,
+            foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
@@ -374,13 +373,14 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: _background,
       appBar: AppBar(
         backgroundColor: _themeGreen,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.black),
+        iconTheme: const IconThemeData(color: Colors.white),
         title: const Text(
           "Bluetooth Scanner",
-          style: TextStyle(color: Colors.black),
+          style: TextStyle(color: Colors.white),
         ),
       ),
       body: Column(
@@ -401,7 +401,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
                 const Icon(
                   Icons.settings_remote,
                   size: 36,
-                  color: Colors.black87,
+                  color: Colors.white,
                 ),
                 const SizedBox(width: 12),
                 const Expanded(
@@ -413,7 +413,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
-                          color: Colors.black87,
+                          color: Colors.white,
                         ),
                       ),
                       SizedBox(height: 4),
@@ -421,7 +421,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
                         "Turn ON the IR device.",
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.black87,
+                          color: Colors.white,
                         ),
                       ),
                     ],
@@ -444,7 +444,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _themeGreen,
-                foregroundColor: Colors.black,
+                foregroundColor: Colors.white,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 shape: RoundedRectangleBorder(
@@ -480,11 +480,11 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
                       decoration: BoxDecoration(
                         color: _showIRBlasterOnly
                             ? const Color(0xFF5E35B1)
-                            : Colors.white,
+                            : _cardBackground,
                         border: Border.all(
                           color: _showIRBlasterOnly
                               ? const Color(0xFF5E35B1)
-                              : Colors.grey.shade400,
+                              : Colors.white54,
                           width: 2,
                         ),
                         borderRadius: BorderRadius.circular(4),
@@ -503,7 +503,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w500,
-                        color: Colors.black87,
+                        color: Colors.white,
                       ),
                     ),
                   ],
@@ -514,9 +514,12 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
 
           if (_isScanning) ...[
             const SizedBox(height: 8),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 12),
-              child: LinearProgressIndicator(),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: LinearProgressIndicator(
+                backgroundColor: _cardBackground,
+                valueColor: AlwaysStoppedAnimation<Color>(_themeGreen),
+              ),
             ),
           ],
 
@@ -538,7 +541,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
                               ? "No Sustainabyte devices found.\nUncheck the filter to see all devices."
                               : "No devices found.\nTap 'Scan Devices' to search again.",
                       textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 14),
+                      style: const TextStyle(fontSize: 14, color: Colors.white70),
                     ),
                   ),
           ),

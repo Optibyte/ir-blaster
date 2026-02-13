@@ -31,8 +31,10 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   late BluetoothDevice _device;
 
   // ====== Theme ======
-  static const Color _themeGreen = Color(0xFFC8E6C9);
-  static const Color _green = Colors.green;
+  static const Color _themeGreen = Color.fromARGB(255, 123, 159, 71);
+  static const Color _background = Color(0xFF1A1A2E);
+  static const Color _cardBackground = Color(0xFF2D2D44);
+  static const Color _green = Color.fromARGB(255, 123, 159, 71);
   static const Color _red = Colors.red;
   static const Color _orange = Colors.orange;
   static const Color _blue = Colors.blue;
@@ -102,6 +104,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   // ====== WiFi Info ======
   String _wifiIP = "";
   String _wifiStatus = "WiFi not connected";
+  bool _isConnectingWifi = false;
   final TextEditingController _ssidController = TextEditingController();
   final TextEditingController _wifiPasswordController = TextEditingController();
 
@@ -175,6 +178,14 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     _loadSavedState();
     _listenBluetooth();
     _startBluetoothStateMonitor();
+    
+    // Automatically request temperature and time on startup
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted && _connection.isConnected) {
+        _sendCommand("GET_TEMP");
+        _sendCommand("GET_TIME");
+      }
+    });
   }
 
   @override
@@ -308,7 +319,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       _lastDisconnectTime = time;
     });
     _log("BT disconnected: $reason @ $time");
-    _showSnack("Bluetooth disconnected", _red);
+    _showReconnectDialog();
   }
 
   String _disconnectHint(String reason) {
@@ -389,6 +400,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         _showMqttDropdown = true;
       });
       _saveWifiStatus(true, ip: ip);
+      _hideWifiLoadingDialog();
+      _showSnack("WiFi connected ✅", _green);
       // auto connect mqtt if values exist
       _sendMqttSettingsToDevice(connect: true);
       return;
@@ -404,6 +417,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         _mqttStatus = "MQTT not connected";
       });
       _saveWifiStatus(false, ip: "");
+      _hideWifiLoadingDialog();
+      _showSnack("WiFi connection failed ❌", _red);
       return;
     }
 
@@ -520,35 +535,72 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
 
   // ===================== WiFi =====================
   void _showWifiSetupDialog() {
+    // Check if Bluetooth is connected
+    if (!_isConnected) {
+      _showSnack("Bluetooth not connected. Please connect first.", _red);
+      return;
+    }
+    
+    bool passwordVisible = false;
+    
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("WiFi Setup"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _ssidController,
-              decoration: const InputDecoration(labelText: "SSID", border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _wifiPasswordController,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: "Password", border: OutlineInputBorder()),
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: _cardBackground,
+          title: const Text("WiFi Setup", style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _ssidController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: "SSID",
+                  labelStyle: TextStyle(color: Colors.white70),
+                  border: OutlineInputBorder(),
+                  enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+                  focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _wifiPasswordController,
+                obscureText: !passwordVisible,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: "Password",
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  border: const OutlineInputBorder(),
+                  enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+                  focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      passwordVisible ? Icons.visibility : Icons.visibility_off,
+                      color: Colors.white70,
+                    ),
+                    onPressed: () {
+                      setDialogState(() {
+                        passwordVisible = !passwordVisible;
+                      });
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel", style: TextStyle(color: Colors.white70))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _themeGreen, foregroundColor: Colors.black),
+              onPressed: () {
+                Navigator.pop(context);
+                _connectWifi();
+              },
+              child: const Text("Send"),
             ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _connectWifi();
-            },
-            child: const Text("Send"),
-          ),
-        ],
       ),
     );
   }
@@ -560,8 +612,20 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       _showSnack("Enter SSID and password", _red);
       return;
     }
-    setState(() => _wifiStatus = "Connecting to WiFi...");
+    setState(() {
+      _wifiStatus = "Connecting to WiFi...";
+      _isConnectingWifi = true;
+    });
+    _showWifiLoadingDialog();
     await _sendCommand("WIFI:$ssid,$pass");
+    
+    // Auto-dismiss loading dialog after 30 seconds if no response from device
+    Future.delayed(const Duration(seconds: 30), () {
+      if (_isConnectingWifi && mounted) {
+        _hideWifiLoadingDialog();
+        _showSnack("WiFi connection timeout. Check device.", _orange);
+      }
+    });
   }
 
   // ===================== MQTT =====================
@@ -763,6 +827,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   Widget _buildStatusCard() {
     final title = _isConnected ? "Connected: ${_device.name ?? 'Device'}" : "Bluetooth not connected";
     return Card(
+      color: _cardBackground,
       elevation: 2,
       margin: const EdgeInsets.all(12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -776,7 +841,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w800, color: Colors.white)),
                   const SizedBox(height: 4),
                   Text(
                     "Mobile Bluetooth: ${_isBluetoothOn ? 'ON' : 'OFF'}",
@@ -785,15 +850,15 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
                   const SizedBox(height: 2),
                   Text(
                     "Last disconnect: $_lastDisconnectTime",
-                    style: const TextStyle(fontSize: 12),
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
                   ),
                   Text(
                     "Reason: ${_disconnectDisplayReason(_lastDisconnectReason)}",
-                    style: const TextStyle(fontSize: 12),
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
                   ),
                   Text(
                     "Hint: ${_disconnectHint(_lastDisconnectReason)}",
-                    style: const TextStyle(fontSize: 12),
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
                   ),
                 ],
               ),
@@ -804,13 +869,13 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
                 Row(children: [
                   Icon(Icons.circle, size: 12, color: _isYellowLedOn ? Colors.yellow : Colors.grey),
                   const SizedBox(width: 4),
-                  const Text("BT"),
+                  const Text("BT", style: TextStyle(color: Colors.white)),
                 ]),
                 const SizedBox(height: 4),
                 Row(children: [
-                  Icon(Icons.circle, size: 12, color: _isGreenLedOn ? Colors.green : Colors.grey),
+                  Icon(Icons.circle, size: 12, color: _isGreenLedOn ? _themeGreen : Colors.grey),
                   const SizedBox(width: 4),
-                  const Text("WiFi"),
+                  const Text("WiFi", style: TextStyle(color: Colors.white)),
                 ]),
               ],
             ),
@@ -826,13 +891,14 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         alignment: Alignment.centerRight,
         child: TextButton.icon(
           onPressed: () => setState(() => _showTerminal = true),
-          icon: const Icon(Icons.developer_mode),
-          label: const Text("Show Logs"),
+          icon: const Icon(Icons.developer_mode, color: Colors.white70),
+          label: const Text("Show Logs", style: TextStyle(color: Colors.white70)),
         ),
       );
     }
 
     return Card(
+      color: _cardBackground,
       elevation: 2,
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -842,8 +908,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
           children: [
             Row(
               children: [
-                const Expanded(child: Text("Terminal / Logs", style: TextStyle(fontWeight: FontWeight.w900))),
-                IconButton(onPressed: () => setState(() => _showTerminal = false), icon: const Icon(Icons.close)),
+                const Expanded(child: Text("Terminal / Logs", style: TextStyle(fontWeight: FontWeight.w900, color: Colors.white))),
+                IconButton(onPressed: () => setState(() => _showTerminal = false), icon: const Icon(Icons.close, color: Colors.white70)),
               ],
             ),
             const SizedBox(height: 8),
@@ -855,7 +921,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
                 reverse: true,
                 child: Text(
                   _terminalController.text,
-                  style: const TextStyle(fontFamily: 'monospace', color: Colors.greenAccent, fontSize: 11),
+                  style: const TextStyle(fontFamily: 'monospace', color: _themeGreen, fontSize: 11),
                 ),
               ),
             ),
@@ -876,6 +942,206 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: c));
   }
 
+  void _showWifiLoadingDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Center(
+        child: Container(
+          width: 100,
+          height: 100,
+          decoration: BoxDecoration(
+            color: _cardBackground,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.4),
+                blurRadius: 30,
+                offset: const Offset(0, 15),
+              ),
+              BoxShadow(
+                color: _themeGreen.withOpacity(0.15),
+                blurRadius: 20,
+                offset: const Offset(0, 0),
+              ),
+            ],
+          ),
+          child: Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(_themeGreen),
+              strokeWidth: 4.5,
+              strokeCap: StrokeCap.round,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _hideWifiLoadingDialog() {
+    if (_isConnectingWifi && mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+      setState(() => _isConnectingWifi = false);
+    }
+  }
+
+  void _showReconnectDialog() {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: _cardBackground,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.bluetooth_disabled, color: _red, size: 28),
+            const SizedBox(width: 12),
+            const Text(
+              "Bluetooth Disconnected",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Connection to ${_device.name ?? 'device'} lost.",
+              style: const TextStyle(fontSize: 15, color: Colors.white70),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _themeGreen.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _themeGreen.withOpacity(0.3)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.white70, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Device is still on. Ready to reconnect.",
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _disconnectBluetooth();
+            },
+            child: const Text(
+              "Go Back",
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _themeGreen,
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
+            onPressed: () {
+              Navigator.pop(context);
+              _attemptReconnect();
+            },
+            icon: const Icon(Icons.bluetooth_connected, size: 20),
+            label: const Text(
+              "Reconnect",
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _attemptReconnect() async {
+    _showLoadingDialog("Reconnecting...");
+    
+    try {
+      final connection = await BluetoothConnection.toAddress(_device.address);
+      if (connection.isConnected && mounted) {
+        _hideLoadingDialog();
+        setState(() {
+          _connection = connection;
+          _isConnected = true;
+          _isYellowLedOn = true;
+        });
+        _listenBluetooth();
+        _showSnack("Reconnected successfully ✅", _green);
+      }
+    } catch (e) {
+      if (mounted) {
+        _hideLoadingDialog();
+        _showSnack("Failed to reconnect. Try again.", _red);
+      }
+    }
+  }
+
+  void _showLoadingDialog(String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Center(
+        child: Container(
+          width: 100,
+          height: 100,
+          decoration: BoxDecoration(
+            color: _cardBackground,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.4),
+                blurRadius: 30,
+                offset: const Offset(0, 15),
+              ),
+              BoxShadow(
+                color: _themeGreen.withOpacity(0.15),
+                blurRadius: 20,
+                offset: const Offset(0, 0),
+              ),
+            ],
+          ),
+          child: Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(_themeGreen),
+              strokeWidth: 4.5,
+              strokeCap: StrokeCap.round,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _hideLoadingDialog() {
+    if (mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+  }
+
   void _disconnectBluetooth() {
     if (_connection.isConnected) _connection.close();
     Navigator.pushAndRemoveUntil(
@@ -889,10 +1155,11 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: _background,
       appBar: AppBar(
-        title: const Text("Configuration", style: TextStyle(color: Colors.black, fontWeight: FontWeight.w900)),
+        title: const Text("Configuration", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
         backgroundColor: _themeGreen,
-        iconTheme: const IconThemeData(color: Colors.black),
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           IconButton(icon: const Icon(Icons.bluetooth_disabled), onPressed: _disconnectBluetooth),
         ],

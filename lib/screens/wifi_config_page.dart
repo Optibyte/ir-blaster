@@ -8,11 +8,14 @@ class WifiConfigPage extends StatefulWidget {
   @override
   State<WifiConfigPage> createState() => _WifiConfigPageState();
 }
-
 class _WifiConfigPageState extends State<WifiConfigPage> {
   final _ssidController = TextEditingController();
   final _passwordController = TextEditingController();
   bool isSending = false;
+
+  static const Color _background = Color(0xFF1A1A2E);
+  static const Color _cardBackground = Color(0xFF2D2D44);
+  static const Color _themeGreen = Color.fromARGB(255, 123, 159, 71);
 
   Future<void> _submitWifiDetails() async {
     final ssid = _ssidController.text.trim();
@@ -44,24 +47,45 @@ class _WifiConfigPageState extends State<WifiConfigPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Configure WiFi')),
+      backgroundColor: _background,
+      appBar: AppBar(
+        title: const Text('Configure WiFi', style: TextStyle(color: Colors.black)),
+        backgroundColor: _themeGreen,
+        iconTheme: const IconThemeData(color: Colors.black),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           children: [
             TextField(
               controller: _ssidController,
-              decoration: const InputDecoration(labelText: 'WiFi SSID'),
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'WiFi SSID',
+                labelStyle: TextStyle(color: Colors.white70),
+                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+                focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+              ),
             ),
             const SizedBox(height: 20),
             TextField(
               controller: _passwordController,
               obscureText: true,
-              decoration: const InputDecoration(labelText: 'WiFi Password'),
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'WiFi Password',
+                labelStyle: TextStyle(color: Colors.white70),
+                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+                focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+              ),
             ),
             const SizedBox(height: 40),
             ElevatedButton(
               onPressed: isSending ? null : _submitWifiDetails,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _themeGreen,
+                foregroundColor: Colors.black,
+              ),
               child: Text(isSending ? 'Sending...' : 'Submit'),
             ),
           ],

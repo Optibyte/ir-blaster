@@ -21,9 +21,9 @@ class ModeSelectorWidget extends StatelessWidget {
         decoration: BoxDecoration(color: themeGreen, borderRadius: BorderRadius.circular(14)),
         child: Column(
           children: [
-            const Icon(Icons.tune, color: Colors.black),
+            const Icon(Icons.tune, color: Colors.white),
             const SizedBox(height: 6),
-            const Text('MODE', style: TextStyle(fontWeight: FontWeight.w800)),
+            const Text('MODE', style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white)),
           ],
         ),
       ),

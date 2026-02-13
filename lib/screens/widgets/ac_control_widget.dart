@@ -36,6 +36,8 @@ class ACControlWidget extends StatelessWidget {
   final VoidCallback onShowSaveRemoteDialog;
   final bool canSaveRemote;
 
+  static const Color _cardBackground = Color(0xFF2D2D44);
+
   const ACControlWidget({
     super.key,
     required this.themeGreen,
@@ -78,7 +80,7 @@ class ACControlWidget extends StatelessWidget {
 
     return Column(
       children: [
-        _buildRemoteConfigDropdown(configBrandValue),
+        // _buildRemoteConfigDropdown(configBrandValue),
         _buildDefaultRemoteDropdown(defaultBrandValue),
       ],
     );
@@ -93,6 +95,7 @@ class ACControlWidget extends StatelessWidget {
 
   Widget _buildDefaultRemoteDropdown(String defaultBrandValue) {
     return Card(
+      color: _cardBackground,
       elevation: 2,
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -105,12 +108,12 @@ class ACControlWidget extends StatelessWidget {
                 const Expanded(
                   child: Text(
                     'Default AC Remote',
-                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: Colors.white),
                   ),
                 ),
                 IconButton(
                   onPressed: onToggleDefaultRemoteDropdown,
-                  icon: Icon(showDefaultRemoteDropdown ? Icons.expand_less : Icons.expand_more),
+                  icon: Icon(showDefaultRemoteDropdown ? Icons.expand_less : Icons.expand_more, color: Colors.white70),
                 ),
               ],
             ),
@@ -118,6 +121,8 @@ class ACControlWidget extends StatelessWidget {
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
                 value: defaultBrandValue,
+                dropdownColor: _cardBackground,
+                style: const TextStyle(color: Colors.white),
                 items: brandItems
                     .map((b) => DropdownMenuItem(value: b, child: Text(b)))
                     .toList(),
@@ -127,14 +132,16 @@ class ACControlWidget extends StatelessWidget {
                 },
                 decoration: const InputDecoration(
                   labelText: 'Brand',
+                  labelStyle: TextStyle(color: Colors.white70),
                   border: OutlineInputBorder(),
+                  enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+                  focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
                   isDense: true,
                 ),
               ),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
                   _RemoteControlButton(
                     label: 'POWER ON',
@@ -142,19 +149,13 @@ class ACControlWidget extends StatelessWidget {
                     onTap: onPowerOn,
                     themeGreen: themeGreen,
                   ),
-                  _RemoteControlButton(
-                    label: 'TEMP +',
-                    icon: Icons.arrow_upward,
-                    onTap: onTempUp,
-                    themeGreen: themeGreen,
-                  ),
-                  _RemoteControlButton(
-                    label: 'TEMP -',
-                    icon: Icons.arrow_downward,
-                    onTap: onTempDown,
-                    themeGreen: themeGreen,
-                  ),
                   FanSpeedWidget(themeGreen: themeGreen, onSwing: onSwing),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
                   ModeSelectorWidget(themeGreen: themeGreen, onMode: onMode),
                   _RemoteControlButton(
                     label: 'POWER OFF',
@@ -171,9 +172,13 @@ class ACControlWidget extends StatelessWidget {
                     child: TextField(
                       controller: onTimeController,
                       readOnly: true,
+                      style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(
                         labelText: 'ON Time (HH:MM)',
+                        labelStyle: TextStyle(color: Colors.white70),
                         border: OutlineInputBorder(),
+                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+                        focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
                         isDense: true,
                       ),
                       onTap: onPickOnTime,
@@ -184,9 +189,13 @@ class ACControlWidget extends StatelessWidget {
                     child: TextField(
                       controller: offTimeController,
                       readOnly: true,
+                      style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(
                         labelText: 'OFF Time (HH:MM)',
+                        labelStyle: TextStyle(color: Colors.white70),
                         border: OutlineInputBorder(),
+                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+                        focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
                         isDense: true,
                       ),
                       onTap: onPickOffTime,
@@ -203,6 +212,7 @@ class ACControlWidget extends StatelessWidget {
 
   Widget _buildRemoteConfigDropdown(String configBrandValue) {
     return Card(
+      color: _cardBackground,
       elevation: 2,
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -215,12 +225,12 @@ class ACControlWidget extends StatelessWidget {
                 const Expanded(
                   child: Text(
                     'Remote Configuration',
-                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: Colors.white),
                   ),
                 ),
                 IconButton(
                   onPressed: onToggleRemoteConfigDropdown,
-                  icon: Icon(showRemoteConfigDropdown ? Icons.expand_less : Icons.expand_more),
+                  icon: Icon(showRemoteConfigDropdown ? Icons.expand_less : Icons.expand_more, color: Colors.white70),
                 ),
               ],
             ),
@@ -228,6 +238,8 @@ class ACControlWidget extends StatelessWidget {
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
                 value: configBrandValue,
+                dropdownColor: _cardBackground,
+                style: const TextStyle(color: Colors.white),
                 items: brandItems
                     .map((b) => DropdownMenuItem(value: b, child: Text(b)))
                     .toList(),
@@ -237,7 +249,10 @@ class ACControlWidget extends StatelessWidget {
                 },
                 decoration: const InputDecoration(
                   labelText: 'Brand to Learn',
+                  labelStyle: TextStyle(color: Colors.white70),
                   border: OutlineInputBorder(),
+                  enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+                  focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
                   isDense: true,
                 ),
               ),
@@ -250,7 +265,7 @@ class ACControlWidget extends StatelessWidget {
                       icon: const Icon(Icons.play_arrow),
                       label: const Text('Start Config'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: themeGreen,
+                          backgroundColor: Colors.green,
                         foregroundColor: Colors.black,
                       ),
                     ),
@@ -259,8 +274,9 @@ class ACControlWidget extends StatelessWidget {
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: (!configMode || waitingForIr) ? null : onTriggerCurrentKeyConfig,
-                      icon: const Icon(Icons.wifi_tethering),
-                      label: Text('Config $currentCfgKey'),
+                      icon: Icon(Icons.wifi_tethering, color: configMode && !waitingForIr ? Colors.white70 : Colors.grey),
+                      label: Text('Config $currentCfgKey', style: TextStyle(color: configMode && !waitingForIr ? Colors.white70 : Colors.grey)),
+                      style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.white54)),
                     ),
                   ),
                 ],
@@ -270,13 +286,15 @@ class ACControlWidget extends StatelessWidget {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'Step ${cfgStepIndex + 1}/$cfgStepsCount  ->  $currentCfgKey',
-                  style: const TextStyle(fontWeight: FontWeight.w800),
+                  style: const TextStyle(fontWeight: FontWeight.w800, color: Colors.white),
                 ),
               ),
               const SizedBox(height: 6),
               LinearProgressIndicator(
                 value: (learningProgress / 100.0).clamp(0.0, 1.0),
                 minHeight: 8,
+                backgroundColor: Colors.white24,
+                valueColor: AlwaysStoppedAnimation<Color>(themeGreen),
               ),
               const SizedBox(height: 8),
               Align(
@@ -285,7 +303,7 @@ class ACControlWidget extends StatelessWidget {
                   cfgStatus,
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
-                    color: waitingForIr ? Colors.orange : Colors.black,
+                    color: waitingForIr ? Colors.orange : Colors.white70,
                   ),
                 ),
               ),
@@ -295,7 +313,7 @@ class ACControlWidget extends StatelessWidget {
                 icon: const Icon(Icons.save),
                 label: const Text('Save Remote'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
+                    backgroundColor: themeGreen,
                   foregroundColor: Colors.white,
                 ),
               ),
@@ -331,9 +349,9 @@ class _RemoteControlButton extends StatelessWidget {
         decoration: BoxDecoration(color: themeGreen, borderRadius: BorderRadius.circular(14)),
         child: Column(
           children: [
-            Icon(icon, color: Colors.black),
+            Icon(icon, color: Colors.white),
             const SizedBox(height: 6),
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
+            Text(label, style: const TextStyle(fontWeight: FontWeight.w800, color: Colors.white)),
           ],
         ),
       ),

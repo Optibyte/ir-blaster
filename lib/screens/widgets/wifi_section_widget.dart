@@ -23,6 +23,8 @@ class WifiSectionWidget extends StatelessWidget {
   final TextEditingController autoOffController;
   final VoidCallback onApplyAutoConfig;
 
+  static const Color _cardBackground = Color(0xFF2D2D44);
+
   const WifiSectionWidget({
     super.key,
     required this.themeGreen,
@@ -60,6 +62,7 @@ class WifiSectionWidget extends StatelessWidget {
 
   Widget _buildWifiCard() {
     return Card(
+      color: _cardBackground,
       elevation: 2,
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -81,7 +84,7 @@ class WifiSectionWidget extends StatelessWidget {
                       color: isWifiConnected ? Colors.green : Colors.red,
                     ),
                   ),
-                  if (wifiIP.isNotEmpty) Text(wifiIP, style: const TextStyle(fontSize: 12)),
+                  if (wifiIP.isNotEmpty) Text(wifiIP, style: const TextStyle(fontSize: 12, color: Colors.white70)),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -93,14 +96,15 @@ class WifiSectionWidget extends StatelessWidget {
                         label: const Text('WiFi Setup'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: themeGreen,
-                          foregroundColor: Colors.black,
+                          foregroundColor: Colors.white,
                         ),
                       ),
                       if (isWifiConnected)
                         OutlinedButton.icon(
                           onPressed: onToggleMqttDropdown,
-                          icon: Icon(showMqttDropdown ? Icons.expand_less : Icons.expand_more, size: 16),
-                          label: Text(showMqttDropdown ? 'Hide MQTT' : 'Show MQTT'),
+                          icon: Icon(showMqttDropdown ? Icons.expand_less : Icons.expand_more, size: 16, color: Colors.white70),
+                          label: Text(showMqttDropdown ? 'Hide MQTT' : 'Show MQTT', style: const TextStyle(color: Colors.white70)),
+                          style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.white54)),
                         ),
                     ],
                   ),
@@ -118,6 +122,7 @@ class WifiSectionWidget extends StatelessWidget {
     if (!showMqttDropdown) return const SizedBox.shrink();
 
     return Card(
+      color: _cardBackground,
       elevation: 2,
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -128,10 +133,10 @@ class WifiSectionWidget extends StatelessWidget {
           children: [
             Row(
               children: [
-                const Expanded(child: Text('MQTT Settings', style: TextStyle(fontWeight: FontWeight.w900))),
+                const Expanded(child: Text('MQTT Settings', style: TextStyle(fontWeight: FontWeight.w900, color: Colors.white))),
                 Chip(
                   label: Text(mqttStatus, style: const TextStyle(fontSize: 12)),
-                  backgroundColor: isMqttConnected ? Colors.green.shade100 : Colors.red.shade100,
+                  backgroundColor: isMqttConnected ? Colors.green.shade700 : Colors.red.shade700,
                 ),
               ],
             ),
@@ -164,7 +169,7 @@ class WifiSectionWidget extends StatelessWidget {
                   label: const Text('Save & Send'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: themeGreen,
-                    foregroundColor: Colors.black,
+                    foregroundColor: Colors.white,
                   ),
                 ),
                 ElevatedButton.icon(
@@ -178,11 +183,11 @@ class WifiSectionWidget extends StatelessWidget {
                 ),
               ],
             ),
-            const Divider(height: 22),
+            const Divider(height: 22, color: Colors.white24),
             Row(
               children: [
-                const Expanded(child: Text('Auto Control', style: TextStyle(fontWeight: FontWeight.w900))),
-                Switch(value: autoControlEnabled, onChanged: onAutoControlChanged),
+                const Expanded(child: Text('Auto Control', style: TextStyle(fontWeight: FontWeight.w900, color: Colors.white))),
+                Switch(value: autoControlEnabled, onChanged: onAutoControlChanged, activeColor: themeGreen),
               ],
             ),
             const SizedBox(height: 8),
@@ -216,10 +221,15 @@ class WifiSectionWidget extends StatelessWidget {
       controller: controller,
       keyboardType: keyboard,
       obscureText: obscure,
-      decoration: const InputDecoration(
-        border: OutlineInputBorder(),
+      style: const TextStyle(color: Colors.white),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(color: Colors.white70),
+        border: const OutlineInputBorder(),
+        enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+        focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
         isDense: true,
-      ).copyWith(labelText: label),
+      ),
     );
   }
 }

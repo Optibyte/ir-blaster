@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'bluetooth_scanner_page.dart';
+import 'package:esp/auth/auth_service.dart';
+import 'package:esp/screens/login_page.dart';
 
 class ModeSelectionPage extends StatefulWidget {
   const ModeSelectionPage({super.key});
@@ -10,11 +12,121 @@ class ModeSelectionPage extends StatefulWidget {
 
 class _ModeSelectionPageState extends State<ModeSelectionPage> {
   int _selectedIndex = 0;
+  final AuthService _authService = AuthService();
 
   void _onNavTapped(int index) {
     setState(() {
       _selectedIndex = index;
     });
+  }
+
+  Future<void> _handleForgotPassword() async {
+    final TextEditingController emailController = TextEditingController();
+    
+    // Pre-fill with current user email if available
+    final currentEmail = await _authService.getUserEmail();
+    if (currentEmail != null) {
+      emailController.text = currentEmail;
+    }
+    
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF2D2D44),
+        title: const Text('Reset Password', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Enter your email to receive a password reset link.',
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: emailController,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                labelStyle: TextStyle(color: Colors.white70),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white54),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+          ),
+          TextButton(
+            onPressed: () async {
+              if (emailController.text.trim().isNotEmpty) {
+                try {
+                  await _authService.sendPasswordResetEmail(emailController.text.trim());
+                  if (!mounted) return;
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Password reset email sent!'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                } catch (e) {
+                  if (!mounted) return;
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(e.toString()),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Send', style: TextStyle(color: Colors.orange)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleLogout() async {
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF2D2D44),
+        title: const Text('Logout', style: TextStyle(color: Colors.white)),
+        content: const Text('Are you sure you want to logout?', style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Logout', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldLogout == true && mounted) {
+      await _authService.logout();
+      if (mounted) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+          (route) => false,
+        );
+      }
+    }
   }
 
   Widget _buildHomeContent() {
@@ -30,8 +142,8 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
               borderRadius: BorderRadius.circular(16),
               gradient: const LinearGradient(
                 colors: [
-                  Color(0xFFC8E6C9), // light green
-                  Color(0xFF81C784), // darker green
+                  Color.fromARGB(255, 123, 159, 71), // primary green
+                  Color.fromARGB(255, 123, 159, 71), // primary green
                 ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
@@ -88,6 +200,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
+              color: Colors.white,
             ),
           ),
           const SizedBox(height: 8),
@@ -95,7 +208,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
             " ",
             style: TextStyle(
               fontSize: 13,
-              color: Colors.black54,
+              color: Colors.white70,
             ),
           ),
 
@@ -103,6 +216,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
 
           // CONFIGURATION MODE CARD
           Card(
+            color: const Color(0xFF2D2D44),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
@@ -124,14 +238,14 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
                   children: [
                     Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFFC8E6C9),
+                        color: const Color.fromARGB(255, 123, 159, 71),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       padding: const EdgeInsets.all(10),
                       child: const Icon(
                         Icons.settings_remote,
                         size: 28,
-                        color: Colors.black87,
+                        color: Colors.white,
                       ),
                     ),
                     const SizedBox(width: 14),
@@ -144,6 +258,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
                             style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.bold,
+                              color: Colors.white,
                             ),
                           ),
                           SizedBox(height: 4),
@@ -151,13 +266,13 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
                             "• Connect to device via Bluetooth\n",
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.black54,
+                              color: Colors.white70,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const Icon(Icons.chevron_right),
+                    const Icon(Icons.chevron_right, color: Colors.white70),
                   ],
                 ),
               ),
@@ -168,6 +283,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
 
           // CLOUD CONTROL INFO CARD (no MQTT config here, only information)
           Card(
+            color: const Color(0xFF2D2D44),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
@@ -179,7 +295,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
                 children: const [
                   Icon(
                     Icons.cloud_queue,
-                    color: Colors.blueGrey,
+                    color: Colors.white70,
                   ),
                   SizedBox(width: 10),
                   Expanded(
@@ -190,7 +306,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
                       "3. MQTT is set in the separate MQTT page.",
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.black54,
+                        color: Colors.white70,
                       ),
                     ),
                   ),
@@ -210,17 +326,36 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
         children: [
           const CircleAvatar(
             radius: 38,
+            backgroundColor: Color(0xFF2D2D44),
             child: Icon(
               Icons.person,
               size: 40,
+              color: Colors.white70,
             ),
           ),
           const SizedBox(height: 10),
+          FutureBuilder<String?>(
+            future: _authService.getUserEmail(),
+            builder: (context, snapshot) {
+              if (snapshot.hasData && snapshot.data != null) {
+                return Text(
+                  snapshot.data!,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Colors.white70,
+                  ),
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
+          const SizedBox(height: 6),
           const Text(
             "Sustainabyte User",
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
+              color: Colors.white,
             ),
           ),
           const SizedBox(height: 4),
@@ -228,31 +363,72 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
             "IoT / Embedded AC IR Blaster",
             style: TextStyle(
               fontSize: 12,
-              color: Colors.black54,
+              color: Colors.white70,
             ),
           ),
           const SizedBox(height: 20),
 
           ListTile(
-            leading: const Icon(Icons.info_outline),
-            title: const Text("App Version"),
-            subtitle: const Text("OptiByte IR Blaster v1.0.0"),
+            leading: const Icon(Icons.info_outline, color: Colors.white70),
+            title: const Text("App Version", style: TextStyle(color: Colors.white)),
+            subtitle: const Text("OptiByte IR Blaster v1.0.0", style: TextStyle(color: Colors.white70)),
             onTap: () {},
           ),
-          const Divider(height: 1),
+          const Divider(height: 1, color: Colors.white24),
           ListTile(
-            leading: const Icon(Icons.business),
-            title: const Text("Company"),
-            subtitle: const Text("Sustainabyte Technologies Pvt Ltd"),
+            leading: const Icon(Icons.business, color: Colors.white70),
+            title: const Text("Company", style: TextStyle(color: Colors.white)),
+            subtitle: const Text("Sustainabyte Technologies Pvt Ltd", style: TextStyle(color: Colors.white70)),
             onTap: () {},
           ),
-          const Divider(height: 1),
+          const Divider(height: 1, color: Colors.white24),
           ListTile(
-            leading: const Icon(Icons.mail_outline),
-            title: const Text("Support"),
-            subtitle: const Text("support@sustainabyte.com"),
+            leading: const Icon(Icons.mail_outline, color: Colors.white70),
+            title: const Text("Support", style: TextStyle(color: Colors.white)),
+            subtitle: const Text("support@sustainabyte.com", style: TextStyle(color: Colors.white70)),
             onTap: () {},
           ),
+          const Divider(height: 1, color: Colors.white24),
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _handleLogout,
+                    icon: const Icon(Icons.logout, size: 20),
+                    label: const Text("Logout"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _handleForgotPassword,
+                    icon: const Icon(Icons.lock_reset, size: 20),
+                    label: const Text("Forgot Password"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
         ],
       ),
     );
@@ -265,23 +441,32 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
         : _buildProfileContent();
 
     return Scaffold(
+      backgroundColor: const Color(0xFF1A1A2E),
       appBar: AppBar(
         title: Center(
           child: Text(
             _selectedIndex == 0 ? "Mode Selection" : "My Profile",
-            style: const TextStyle(color: Colors.black),
+            style: const TextStyle(color: Colors.white),
           ),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFF1A1A2E),
         elevation: 1,
-        iconTheme: const IconThemeData(color: Colors.black),
+        iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.red),
+            onPressed: _handleLogout,
+            tooltip: 'Logout',
+          ),
+        ],
       ),
       body: body,
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: _onNavTapped,
-        selectedItemColor: const Color(0xFF388E3C), // dark green
-        unselectedItemColor: Colors.grey,
+        selectedItemColor: const Color.fromARGB(255, 123, 159, 71),
+        unselectedItemColor: Colors.white70,
+        backgroundColor: const Color(0xFF1A1A2E),
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(

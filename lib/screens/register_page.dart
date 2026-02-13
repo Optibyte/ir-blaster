@@ -1,28 +1,46 @@
 import 'package:flutter/material.dart';
-import 'package:esp/screens/mode_selection_page.dart';
 import 'package:esp/auth/auth_service.dart';
-import 'package:esp/screens/register_page.dart';
+import 'package:esp/screens/login_page.dart';
 import 'package:esp/utils/app_colors.dart';
 
-class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+class RegisterPage extends StatefulWidget {
+  const RegisterPage({super.key});
 
   @override
-  State<LoginPage> createState() => _LoginPageState();
+  State<RegisterPage> createState() => _RegisterPageState();
 }
-class _LoginPageState extends State<LoginPage> {
-  final TextEditingController usernameController = TextEditingController();
+
+class _RegisterPageState extends State<RegisterPage> {
+  final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
+  final TextEditingController confirmPasswordController = TextEditingController();
   final AuthService _authService = AuthService();
   bool _isLoading = false;
   bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
 
-  void _handleLogin(BuildContext context) async {
-    final String email = usernameController.text.trim();
+  void _handleRegister() async {
+    final String email = emailController.text.trim();
     final String password = passwordController.text.trim();
+    final String confirmPassword = confirmPasswordController.text.trim();
 
-    if (email.isEmpty || password.isEmpty) {
-      _showErrorDialog('Please enter both email and password');
+    if (email.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
+      _showErrorDialog('Please fill in all fields');
+      return;
+    }
+
+    if (!_isValidEmail(email)) {
+      _showErrorDialog('Please enter a valid email address');
+      return;
+    }
+
+    if (password.length < 6) {
+      _showErrorDialog('Password must be at least 6 characters');
+      return;
+    }
+
+    if (password != confirmPassword) {
+      _showErrorDialog('Passwords do not match');
       return;
     }
 
@@ -31,13 +49,20 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     try {
-      await _authService.validateLogin(email, password);
+      await _authService.registerUser(email, password);
       
       if (!mounted) return;
       
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Registration successful! Please login.'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+      
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const ModeSelectionPage()),
+        MaterialPageRoute(builder: (_) => const LoginPage()),
       );
     } catch (e) {
       if (!mounted) return;
@@ -51,13 +76,17 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  bool _isValidEmail(String email) {
+    return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email);
+  }
+
   void _showErrorDialog(String message) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.cardBackground,
         title: const Text(
-          "Login Failed",
+          "Registration Failed",
           style: TextStyle(color: AppColors.textPrimary),
         ),
         content: Text(
@@ -74,77 +103,11 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  void _handleForgotPassword() {
-    final TextEditingController emailController = TextEditingController();
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.cardBackground,
-        title: const Text(
-          "Reset Password",
-          style: TextStyle(color: AppColors.textPrimary),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              "Enter your email to receive a password reset link",
-              style: TextStyle(color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: emailController,
-              style: const TextStyle(color: AppColors.textPrimary),
-              decoration: InputDecoration(
-                hintText: "Email",
-                hintStyle: const TextStyle(color: AppColors.textHint),
-                filled: true,
-                fillColor: AppColors.inputBackground,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel", style: TextStyle(color: AppColors.textSecondary)),
-          ),
-          TextButton(
-            onPressed: () async {
-              if (emailController.text.trim().isNotEmpty) {
-                try {
-                  await _authService.sendPasswordResetEmail(emailController.text.trim());
-                  if (!mounted) return;
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Password reset email sent!'),
-                      backgroundColor: AppColors.success,
-                    ),
-                  );
-                } catch (e) {
-                  if (!mounted) return;
-                  Navigator.pop(context);
-                  _showErrorDialog(e.toString());
-                }
-              }
-            },
-            child: const Text("Send", style: TextStyle(color: AppColors.primary)),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   void dispose() {
-    usernameController.dispose();
+    emailController.dispose();
     passwordController.dispose();
+    confirmPasswordController.dispose();
     super.dispose();
   }
 
@@ -157,7 +120,23 @@ class _LoginPageState extends State<LoginPage> {
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
             children: [
-              const SizedBox(height: 60),
+              const SizedBox(height: 40),
+              
+              // Back button
+              Align(
+                alignment: Alignment.centerLeft,
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back_ios, color: AppColors.textPrimary),
+                  onPressed: () {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (_) => const LoginPage()),
+                    );
+                  },
+                ),
+              ),
+              
+              const SizedBox(height: 20),
               
               // Logo
               Container(
@@ -179,46 +158,33 @@ class _LoginPageState extends State<LoginPage> {
               
               // Title
               const Text(
-                "Optibyte - IR Blaster",
+                "Create Account",
                 style: TextStyle(
-                  fontSize: 24,
+                  fontSize: 28,
                   fontWeight: FontWeight.bold,
                   color: AppColors.textPrimary,
                 ),
               ),
               
-              const SizedBox(height: 4),
+              const SizedBox(height: 8),
               
-              // Subtitle
               const Text(
-                "by Sustainabyte.ai",
+                "Register to get started",
                 style: TextStyle(
                   fontSize: 14,
                   color: AppColors.textSecondary,
                 ),
               ),
               
-              const SizedBox(height: 30),
-              
-              // Sign in text
-              const Text(
-                "Sign in to access Dashboard",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              
               const SizedBox(height: 40),
               
-              // Username field
+              // Email field
               TextField(
-                controller: usernameController,
+                controller: emailController,
                 keyboardType: TextInputType.emailAddress,
                 style: const TextStyle(color: AppColors.textPrimary),
                 decoration: InputDecoration(
-                  hintText: "UserName",
+                  hintText: "Email",
                   hintStyle: const TextStyle(color: AppColors.textHint),
                   filled: true,
                   fillColor: AppColors.inputBackground,
@@ -238,7 +204,7 @@ class _LoginPageState extends State<LoginPage> {
                 obscureText: _obscurePassword,
                 style: const TextStyle(color: AppColors.textPrimary),
                 decoration: InputDecoration(
-                  hintText: "Password",
+                  hintText: "Password (min 6 characters)",
                   hintStyle: const TextStyle(color: AppColors.textHint),
                   filled: true,
                   fillColor: AppColors.inputBackground,
@@ -261,14 +227,45 @@ class _LoginPageState extends State<LoginPage> {
                 ),
               ),
               
+              const SizedBox(height: 16),
+              
+              // Confirm Password field
+              TextField(
+                controller: confirmPasswordController,
+                obscureText: _obscureConfirmPassword,
+                style: const TextStyle(color: AppColors.textPrimary),
+                decoration: InputDecoration(
+                  hintText: "Confirm Password",
+                  hintStyle: const TextStyle(color: AppColors.textHint),
+                  filled: true,
+                  fillColor: AppColors.inputBackground,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(30),
+                    borderSide: BorderSide.none,
+                  ),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureConfirmPassword ? Icons.visibility_off : Icons.visibility,
+                      color: AppColors.textHint,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _obscureConfirmPassword = !_obscureConfirmPassword;
+                      });
+                    },
+                  ),
+                ),
+              ),
+              
               const SizedBox(height: 30),
               
-              // Sign In button
+              // Register button
               SizedBox(
                 width: double.infinity,
                 height: 56,
                 child: ElevatedButton(
-                  onPressed: _isLoading ? null : () => _handleLogin(context),
+                  onPressed: _isLoading ? null : _handleRegister,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: AppColors.buttonText,
@@ -290,7 +287,7 @@ class _LoginPageState extends State<LoginPage> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Text(
-                              "Sign In",
+                              "Register",
                               style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
@@ -303,58 +300,23 @@ class _LoginPageState extends State<LoginPage> {
                 ),
               ),
               
-              const SizedBox(height: 20),
+              const SizedBox(height: 24),
               
-              // Forget Password
-              TextButton(
-                onPressed: _handleForgotPassword,
-                child: const Text(
-                  "Forget Password ?",
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-              
-              const SizedBox(height: 16),
-              
-              // Register link
+              // Login link
               TextButton(
                 onPressed: () {
-                  Navigator.push(
+                  Navigator.pushReplacement(
                     context,
-                    MaterialPageRoute(builder: (_) => const RegisterPage()),
+                    MaterialPageRoute(builder: (_) => const LoginPage()),
                   );
                 },
                 child: const Text(
-                  "Don't have an account? Register here",
+                  "Already have an account? Sign in",
                   style: TextStyle(
                     color: AppColors.primary,
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
                   ),
-                ),
-              ),
-              
-              const SizedBox(height: 40),
-              
-              // Footer text
-              RichText(
-                textAlign: TextAlign.center,
-                text: const TextSpan(
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
-                  ),
-                  children: [
-                    TextSpan(text: "Only the user who has the license of "),
-                    TextSpan(
-                      text: "Sustainabyte Technology Pvt. Ltd.",
-                      style: TextStyle(color: AppColors.primary),
-                    ),
-                    TextSpan(text: " can access this dashboard"),
-                  ],
                 ),
               ),
               

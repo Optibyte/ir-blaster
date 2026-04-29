@@ -116,6 +116,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   bool _showTerminal = true;
   final TextEditingController _terminalController = TextEditingController();
   String _incomingBuffer = "";
+  bool _needsUpdate = false;
 
   // ===================== MQTT =====================
   bool _showMqttDropdown = false;
@@ -935,7 +936,18 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   void _log(String msg) {
     final t = DateFormat("HH:mm:ss").format(DateTime.now());
     _terminalController.text += "[$t] $msg\n";
-    setState(() {});
+    
+    // Throttle UI updates for logs if they come in too fast
+    if (!_needsUpdate) {
+      _needsUpdate = true;
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted && _needsUpdate) {
+          setState(() {
+            _needsUpdate = false;
+          });
+        }
+      });
+    }
   }
 
   void _showSnack(String msg, Color c) {
@@ -1167,8 +1179,9 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       body: SingleChildScrollView(
         child: Column(
           children: [
-            _buildStatusCard(),
-            WifiSectionWidget(
+            RepaintBoundary(child: _buildStatusCard()),
+            RepaintBoundary(
+              child: WifiSectionWidget(
               themeGreen: _themeGreen,
               isWifiConnected: _isWifiConnected,
               wifiStatus: _wifiStatus,
@@ -1194,8 +1207,9 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
               autoOnController: _autoOnController,
               autoOffController: _autoOffController,
               onApplyAutoConfig: _sendAutoSetpointsToDevice,
-            ),
-            TemperatureWidget(
+            )),
+            RepaintBoundary(
+              child: TemperatureWidget(
               temperatureText: _temperatureText,
               deviceTimeText: _deviceTimeText,
               onRefreshTemp: () => _sendCommand("GET_TEMP"),
@@ -1209,8 +1223,9 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
                   if (mounted) _sendCommand("GET_TIME");
                 });
               },
-            ),
-            ACControlWidget(
+            )),
+            RepaintBoundary(
+              child: ACControlWidget(
               themeGreen: _themeGreen,
               brandItems: _brandDropdownItems(),
               showDefaultRemoteDropdown: _showDefaultRemoteDropdown,
@@ -1244,9 +1259,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
               onTriggerCurrentKeyConfig: _triggerCurrentKeyConfig,
               onShowSaveRemoteDialog: _showSaveRemoteDialog,
               canSaveRemote: _cfgStatus.contains("All keys captured"),
-            ),
-
-            _buildTerminal(),
+            )),
+            RepaintBoundary(child: _buildTerminal()),
             const SizedBox(height: 16),
           ],
         ),

@@ -15,8 +15,10 @@ class BluetoothScannerPage extends StatefulWidget {
 class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
   bool _isScanning = false;
   final List<BluetoothDiscoveryResult> _devices = [];
-  StreamSubscription<BluetoothDiscoveryResult>? _streamSubscription;
   bool _showIRBlasterOnly = true;
+  StreamSubscription<BluetoothDiscoveryResult>? _streamSubscription;
+  Timer? _uiUpdateTimer;
+  bool _needsUpdate = false;
 
   static const Color _themeGreen = Color.fromARGB(255, 123, 159, 71);
   static const Color _background = Color(0xFF1A1A2E);
@@ -37,18 +39,20 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
     ].request();
 
     // Check if all permissions are granted
-    bool allGranted = statuses.values.every(
-      (status) => status.isGranted || status.isLimited,
-    );
+    bool allGranted = statuses[Permission.bluetoothConnect]!.isGranted &&
+                      statuses[Permission.bluetoothScan]!.isGranted;
+    
+    // Location is often required for Bluetooth discovery on older Android versions
+    bool locationGranted = statuses[Permission.locationWhenInUse]!.isGranted;
 
     if (!allGranted && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content:
-              Text("❌ Bluetooth permissions are required to scan devices."),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _showPermissionError("Bluetooth permissions are required to scan.");
+      return false;
+    }
+    
+    if (!locationGranted && mounted) {
+      _showPermissionError("Location permission is required for Bluetooth discovery.");
+      return false;
     }
 
     return allGranted;
@@ -84,13 +88,22 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("❌ Error enabling Bluetooth: $e"),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _showPermissionError("Error enabling Bluetooth: $e");
     }
+  }
+
+  void _showPermissionError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("❌ $message"),
+        backgroundColor: Colors.red,
+        action: SnackBarAction(
+          label: "Settings",
+          textColor: Colors.white,
+          onPressed: () => openAppSettings(),
+        ),
+      ),
+    );
   }
 
   void _startScan() async {
@@ -114,20 +127,32 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
 
     _streamSubscription =
         FlutterBluetoothSerial.instance.startDiscovery().listen((result) {
-      setState(() {
-        final index = _devices
-            .indexWhere((d) => d.device.address == result.device.address);
-        if (index >= 0) {
-          _devices[index] = result;
-        } else {
-          _devices.add(result);
-        }
-      });
+      final index = _devices
+          .indexWhere((d) => d.device.address == result.device.address);
+      if (index >= 0) {
+        _devices[index] = result;
+      } else {
+        _devices.add(result);
+      }
+      _needsUpdate = true;
+    });
+
+    // Start a timer to update the UI periodically instead of on every device discovery
+    _uiUpdateTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      if (_needsUpdate && mounted) {
+        setState(() {
+          _needsUpdate = false;
+        });
+      }
     });
 
     _streamSubscription?.onDone(() {
+      _uiUpdateTimer?.cancel();
       if (mounted) {
-        setState(() => _isScanning = false);
+        setState(() {
+          _isScanning = false;
+          _needsUpdate = false;
+        });
       }
     });
   }
@@ -300,6 +325,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
   @override
   void dispose() {
     _streamSubscription?.cancel();
+    _uiUpdateTimer?.cancel();
     super.dispose();
   }
 
@@ -527,23 +553,27 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
 
           // Devices list
           Expanded(
-            child: _filteredDevices.isNotEmpty
-                ? ListView.builder(
-                    itemCount: _filteredDevices.length,
-                    itemBuilder: (context, index) =>
-                        _buildDeviceTile(_filteredDevices[index]),
-                  )
-                : Center(
-                    child: Text(
-                      _isScanning
-                          ? "Scanning for Bluetooth devices..."
-                          : _showIRBlasterOnly
-                              ? "No Sustainabyte devices found.\nUncheck the filter to see all devices."
-                              : "No devices found.\nTap 'Scan Devices' to search again.",
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 14, color: Colors.white70),
+            child: RepaintBoundary(
+              child: _filteredDevices.isNotEmpty
+                  ? ListView.builder(
+                      itemCount: _filteredDevices.length,
+                      padding: const EdgeInsets.only(bottom: 20),
+                      physics: const BouncingScrollPhysics(),
+                      itemBuilder: (context, index) =>
+                          _buildDeviceTile(_filteredDevices[index]),
+                    )
+                  : Center(
+                      child: Text(
+                        _isScanning
+                            ? "Scanning for Bluetooth devices..."
+                            : _showIRBlasterOnly
+                                ? "No Sustainabyte devices found.\nUncheck the filter to see all devices."
+                                : "No devices found.\nTap 'Scan Devices' to search again.",
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 14, color: Colors.white70),
+                      ),
                     ),
-                  ),
+            ),
           ),
         ],
       ),

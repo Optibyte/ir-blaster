@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'bluetooth_scanner_page.dart';
-import 'package:esp/auth/auth_service.dart';
-import 'package:esp/screens/login_page.dart';
+import 'package:esp/core/services/auth_service.dart';
+import 'package:esp/screens/ac_app/sigin.dart';
 
 class ModeSelectionPage extends StatefulWidget {
   const ModeSelectionPage({super.key});
@@ -11,20 +11,12 @@ class ModeSelectionPage extends StatefulWidget {
 }
 
 class _ModeSelectionPageState extends State<ModeSelectionPage> {
-  int _selectedIndex = 0;
-  final AuthService _authService = AuthService();
-
-  void _onNavTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
-  }
 
   Future<void> _handleForgotPassword() async {
     final TextEditingController emailController = TextEditingController();
     
     // Pre-fill with current user email if available
-    final currentEmail = await _authService.getUserEmail();
+    final currentEmail = await AuthService.getEmail();
     if (currentEmail != null) {
       emailController.text = currentEmail;
     }
@@ -69,7 +61,9 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
             onPressed: () async {
               if (emailController.text.trim().isNotEmpty) {
                 try {
-                  await _authService.sendPasswordResetEmail(emailController.text.trim());
+                  // await AuthService.sendPasswordResetEmail(emailController.text.trim());
+                  // Mock HVAC AuthService doesn't support this yet
+                  await Future.delayed(const Duration(milliseconds: 500));
                   if (!mounted) return;
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -118,11 +112,11 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
     );
 
     if (shouldLogout == true && mounted) {
-      await _authService.logout();
+      await AuthService.logout();
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => const LoginPage()),
+          MaterialPageRoute(builder: (_) => const SignInPage()),
           (route) => false,
         );
       }
@@ -335,7 +329,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
           ),
           const SizedBox(height: 10),
           FutureBuilder<String?>(
-            future: _authService.getUserEmail(),
+            future: AuthService.getEmail(),
             builder: (context, snapshot) {
               if (snapshot.hasData && snapshot.data != null) {
                 return Text(
@@ -436,49 +430,47 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
 
   @override
   Widget build(BuildContext context) {
-    final body = _selectedIndex == 0
-        ? _buildHomeContent()
-        : _buildProfileContent();
-
     return Scaffold(
       backgroundColor: const Color(0xFF1A1A2E),
       appBar: AppBar(
-        title: Center(
-          child: Text(
-            _selectedIndex == 0 ? "Mode Selection" : "My Profile",
-            style: const TextStyle(color: Colors.white),
-          ),
+        title: const Text(
+          "Mode Selection",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
+        centerTitle: true,
         backgroundColor: const Color(0xFF1A1A2E),
-        elevation: 1,
-        iconTheme: const IconThemeData(color: Colors.white),
+        elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout, color: Colors.red),
+            icon: const Icon(Icons.person_outline, color: Colors.white70),
+            onPressed: () {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: const Color(0xFF1A1A2E),
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                builder: (context) => DraggableScrollableSheet(
+                  initialChildSize: 0.7,
+                  minChildSize: 0.5,
+                  maxChildSize: 0.95,
+                  expand: false,
+                  builder: (context, scrollController) => SingleChildScrollView(
+                    controller: scrollController,
+                    child: _buildProfileContent(),
+                  ),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.redAccent),
             onPressed: _handleLogout,
-            tooltip: 'Logout',
           ),
         ],
       ),
-      body: body,
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        onTap: _onNavTapped,
-        selectedItemColor: const Color.fromARGB(255, 123, 159, 71),
-        unselectedItemColor: Colors.white70,
-        backgroundColor: const Color(0xFF1A1A2E),
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: "Home Screen",
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person),
-            label: "My Profile",
-          ),
-        ],
-      ),
+      body: _buildHomeContent(),
     );
   }
 }

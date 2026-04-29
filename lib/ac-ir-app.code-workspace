@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../optibyte(workspace)/optibyte-ui"
+		},
+		{
+			"path": "../../optibyte(workspace)/opti-provission"
+		}
+	],
+	"settings": {}
+}

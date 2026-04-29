@@ -26,6 +26,13 @@ dependencies:
   firebase_auth: ^5.3.3
   cloud_firestore: ^5.5.2
   flutter_svg: ^2.0.10+1
+  flutter_dotenv: ^6.0.0
+  flutter_secure_storage: ^10.0.0
+  google_fonts: ^6.1.0
+  provider: ^6.1.2
+  syncfusion_flutter_charts: ^33.2.4
+  syncfusion_flutter_gauges: ^33.2.3
+  web_socket_channel: ^3.0.3
 
 dev_dependencies:
   flutter_test:
@@ -38,6 +45,7 @@ flutter:
   assets:
     - assets/icon/
     - assets/images/
+    - .env
 
 flutter_icons:
   android: "launcher_icon"

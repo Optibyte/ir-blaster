@@ -8,6 +8,9 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'bluetooth_scanner_page.dart';
+import 'widgets/ac_control_widget.dart';
+import 'widgets/temperature_widget.dart';
+import 'widgets/wifi_section_widget.dart';
 
 class ConfigurationPage extends StatefulWidget {
   final BluetoothConnection connection;
@@ -28,8 +31,10 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   late BluetoothDevice _device;
 
   // ====== Theme ======
-  static const Color _themeGreen = Color(0xFFC8E6C9);
-  static const Color _green = Colors.green;
+  static const Color _themeGreen = Color.fromARGB(255, 123, 159, 71);
+  static const Color _background = Color(0xFF1A1A2E);
+  static const Color _cardBackground = Color(0xFF2D2D44);
+  static const Color _green = Color.fromARGB(255, 123, 159, 71);
   static const Color _red = Colors.red;
   static const Color _orange = Colors.orange;
   static const Color _blue = Colors.blue;
@@ -91,10 +96,15 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   bool _isWifiConnected = false;
   bool _isGreenLedOn = false;
   bool _isYellowLedOn = false;
+  bool _isBluetoothOn = false;
+  String _lastDisconnectReason = "N/A";
+  String _lastDisconnectTime = "N/A";
+  Timer? _bluetoothStateTimer;
 
   // ====== WiFi Info ======
   String _wifiIP = "";
   String _wifiStatus = "WiFi not connected";
+  bool _isConnectingWifi = false;
   final TextEditingController _ssidController = TextEditingController();
   final TextEditingController _wifiPasswordController = TextEditingController();
 
@@ -106,6 +116,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   bool _showTerminal = true;
   final TextEditingController _terminalController = TextEditingController();
   String _incomingBuffer = "";
+  bool _needsUpdate = false;
 
   // ===================== MQTT =====================
   bool _showMqttDropdown = false;
@@ -167,10 +178,20 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
 
     _loadSavedState();
     _listenBluetooth();
+    _startBluetoothStateMonitor();
+    
+    // Automatically request temperature and time on startup
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted && _connection.isConnected) {
+        _sendCommand("GET_TEMP");
+        _sendCommand("GET_TIME");
+      }
+    });
   }
 
   @override
   void dispose() {
+    _bluetoothStateTimer?.cancel();
     _ssidController.dispose();
     _wifiPasswordController.dispose();
 
@@ -270,6 +291,56 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     } catch (_) {}
   }
 
+  void _startBluetoothStateMonitor() {
+    _updateBluetoothState();
+    _bluetoothStateTimer?.cancel();
+    _bluetoothStateTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => _updateBluetoothState(),
+    );
+  }
+
+  Future<void> _updateBluetoothState() async {
+    try {
+      final isEnabled = await FlutterBluetoothSerial.instance.isEnabled;
+      if (!mounted) return;
+      setState(() => _isBluetoothOn = isEnabled ?? false);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isBluetoothOn = false);
+    }
+  }
+
+  void _recordDisconnect(String reason) {
+    final time = DateFormat("yyyy-MM-dd HH:mm:ss").format(DateTime.now());
+    setState(() {
+      _isConnected = false;
+      _isYellowLedOn = false;
+      _lastDisconnectReason = reason;
+      _lastDisconnectTime = time;
+    });
+    _log("BT disconnected: $reason @ $time");
+    _showReconnectDialog();
+  }
+
+  String _disconnectHint(String reason) {
+    final r = reason.toLowerCase();
+    if (r.contains("remote")) {
+      return "Device closed the link (idle timeout or reboot)";
+    }
+    if (r.contains("error")) {
+      return "Bluetooth stack error (signal or OS)";
+    }
+    return "Unknown cause";
+  }
+
+  String _disconnectDisplayReason(String reason) {
+    if (reason.toLowerCase().contains("remote")) {
+      return "Device closed the connection";
+    }
+    return reason;
+  }
+
   // ===================== BT Rx =====================
   void _listenBluetooth() {
     _connection.input?.listen((Uint8List data) {
@@ -281,12 +352,12 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       while ((line = _extractLine()) != "") {
         _handleLine(line.trim());
       }
+    }, onError: (error) {
+      if (!mounted) return;
+      _recordDisconnect("Error: $error");
     }).onDone(() {
-      setState(() {
-        _isConnected = false;
-        _isYellowLedOn = false;
-      });
-      _showSnack("Bluetooth disconnected", _red);
+      if (!mounted) return;
+      _recordDisconnect("Disconnected by remote");
     });
   }
 
@@ -330,6 +401,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         _showMqttDropdown = true;
       });
       _saveWifiStatus(true, ip: ip);
+      _hideWifiLoadingDialog();
+      _showSnack("WiFi connected ✅", _green);
       // auto connect mqtt if values exist
       _sendMqttSettingsToDevice(connect: true);
       return;
@@ -345,6 +418,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         _mqttStatus = "MQTT not connected";
       });
       _saveWifiStatus(false, ip: "");
+      _hideWifiLoadingDialog();
+      _showSnack("WiFi connection failed ❌", _red);
       return;
     }
 
@@ -461,35 +536,72 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
 
   // ===================== WiFi =====================
   void _showWifiSetupDialog() {
+    // Check if Bluetooth is connected
+    if (!_isConnected) {
+      _showSnack("Bluetooth not connected. Please connect first.", _red);
+      return;
+    }
+    
+    bool passwordVisible = false;
+    
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("WiFi Setup"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _ssidController,
-              decoration: const InputDecoration(labelText: "SSID", border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _wifiPasswordController,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: "Password", border: OutlineInputBorder()),
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: _cardBackground,
+          title: const Text("WiFi Setup", style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _ssidController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: "SSID",
+                  labelStyle: TextStyle(color: Colors.white70),
+                  border: OutlineInputBorder(),
+                  enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+                  focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _wifiPasswordController,
+                obscureText: !passwordVisible,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: "Password",
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  border: const OutlineInputBorder(),
+                  enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+                  focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      passwordVisible ? Icons.visibility : Icons.visibility_off,
+                      color: Colors.white70,
+                    ),
+                    onPressed: () {
+                      setDialogState(() {
+                        passwordVisible = !passwordVisible;
+                      });
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel", style: TextStyle(color: Colors.white70))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _themeGreen, foregroundColor: Colors.black),
+              onPressed: () {
+                Navigator.pop(context);
+                _connectWifi();
+              },
+              child: const Text("Send"),
             ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _connectWifi();
-            },
-            child: const Text("Send"),
-          ),
-        ],
       ),
     );
   }
@@ -501,8 +613,20 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       _showSnack("Enter SSID and password", _red);
       return;
     }
-    setState(() => _wifiStatus = "Connecting to WiFi...");
+    setState(() {
+      _wifiStatus = "Connecting to WiFi...";
+      _isConnectingWifi = true;
+    });
+    _showWifiLoadingDialog();
     await _sendCommand("WIFI:$ssid,$pass");
+    
+    // Auto-dismiss loading dialog after 30 seconds if no response from device
+    Future.delayed(const Duration(seconds: 30), () {
+      if (_isConnectingWifi && mounted) {
+        _hideWifiLoadingDialog();
+        _showSnack("WiFi connection timeout. Check device.", _orange);
+      }
+    });
   }
 
   // ===================== MQTT =====================
@@ -704,6 +828,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   Widget _buildStatusCard() {
     final title = _isConnected ? "Connected: ${_device.name ?? 'Device'}" : "Bluetooth not connected";
     return Card(
+      color: _cardBackground,
       elevation: 2,
       margin: const EdgeInsets.all(12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -713,475 +838,48 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
           children: [
             Icon(_isConnected ? Icons.bluetooth_connected : Icons.bluetooth_disabled, color: _isConnected ? _blue : _red),
             const SizedBox(width: 10),
-            Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800))),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w800, color: Colors.white)),
+                  const SizedBox(height: 4),
+                  Text(
+                    "Mobile Bluetooth: ${_isBluetoothOn ? 'ON' : 'OFF'}",
+                    style: TextStyle(fontSize: 12, color: _isBluetoothOn ? _green : _red),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    "Last disconnect: $_lastDisconnectTime",
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                  Text(
+                    "Reason: ${_disconnectDisplayReason(_lastDisconnectReason)}",
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                  Text(
+                    "Hint: ${_disconnectHint(_lastDisconnectReason)}",
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                ],
+              ),
+            ),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Row(children: [
                   Icon(Icons.circle, size: 12, color: _isYellowLedOn ? Colors.yellow : Colors.grey),
                   const SizedBox(width: 4),
-                  const Text("BT"),
+                  const Text("BT", style: TextStyle(color: Colors.white)),
                 ]),
                 const SizedBox(height: 4),
                 Row(children: [
-                  Icon(Icons.circle, size: 12, color: _isGreenLedOn ? Colors.green : Colors.grey),
+                  Icon(Icons.circle, size: 12, color: _isGreenLedOn ? _themeGreen : Colors.grey),
                   const SizedBox(width: 4),
-                  const Text("WiFi"),
+                  const Text("WiFi", style: TextStyle(color: Colors.white)),
                 ]),
               ],
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildWifiCard() {
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.wifi, color: _themeGreen),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _wifiStatus,
-                    style: TextStyle(fontWeight: FontWeight.w800, color: _isWifiConnected ? _green : _red),
-                  ),
-                  if (_wifiIP.isNotEmpty) Text(_wifiIP, style: const TextStyle(fontSize: 12)),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      ElevatedButton.icon(
-                        onPressed: _showWifiSetupDialog,
-                        icon: const Icon(Icons.settings, size: 16),
-                        label: const Text("WiFi Setup"),
-                        style: ElevatedButton.styleFrom(backgroundColor: _themeGreen, foregroundColor: Colors.black),
-                      ),
-                      if (_isWifiConnected)
-                        OutlinedButton.icon(
-                          onPressed: () => setState(() => _showMqttDropdown = !_showMqttDropdown),
-                          icon: Icon(_showMqttDropdown ? Icons.expand_less : Icons.expand_more, size: 16),
-                          label: Text(_showMqttDropdown ? "Hide MQTT" : "Show MQTT"),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMqttDropdownCard() {
-    if (!_isWifiConnected) return const SizedBox.shrink();
-    if (!_showMqttDropdown) return const SizedBox.shrink();
-
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Expanded(child: Text("MQTT Settings", style: TextStyle(fontWeight: FontWeight.w900))),
-                Chip(
-                  label: Text(_mqttStatus, style: const TextStyle(fontSize: 12)),
-                  backgroundColor: _isMqttConnected ? Colors.green.shade100 : Colors.red.shade100,
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            _field("Host / IP", _mqttHostController),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(child: _field("Port", _mqttPortController, keyboard: TextInputType.number)),
-                const SizedBox(width: 10),
-                Expanded(child: _field("Topic", _mqttTopicController)),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(child: _field("Username", _mqttUserController)),
-                const SizedBox(width: 10),
-                Expanded(child: _field("Password", _mqttPassController, obscure: true)),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ElevatedButton.icon(
-                  onPressed: () => _sendMqttSettingsToDevice(connect: false),
-                  icon: const Icon(Icons.save, size: 16),
-                  label: const Text("Save & Send"),
-                  style: ElevatedButton.styleFrom(backgroundColor: _themeGreen, foregroundColor: Colors.black),
-                ),
-                ElevatedButton.icon(
-                  onPressed: () => _sendMqttSettingsToDevice(connect: true),
-                  icon: const Icon(Icons.cloud_done, size: 16),
-                  label: const Text("Connect MQTT"),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-                ),
-              ],
-            ),
-            const Divider(height: 22),
-            Row(
-              children: [
-                const Expanded(child: Text("Auto Control", style: TextStyle(fontWeight: FontWeight.w900))),
-                Switch(
-                  value: _autoControlEnabled,
-                  onChanged: (v) async {
-                    setState(() => _autoControlEnabled = v);
-                    await _saveAutoPrefs();
-                    await _sendAutoSetpointsToDevice();
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(child: _field("Auto ON Temp (°C)", _autoOnController, keyboard: TextInputType.number)),
-                const SizedBox(width: 10),
-                Expanded(child: _field("Auto OFF Temp (°C)", _autoOffController, keyboard: TextInputType.number)),
-              ],
-            ),
-            const SizedBox(height: 10),
-            ElevatedButton.icon(
-              onPressed: _sendAutoSetpointsToDevice,
-              icon: const Icon(Icons.tune, size: 16),
-              label: const Text("Apply Auto Config"),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _field(
-    String label,
-    TextEditingController c, {
-    TextInputType keyboard = TextInputType.text,
-    bool obscure = false,
-  }) {
-    return TextField(
-      controller: c,
-      keyboardType: keyboard,
-      obscureText: obscure,
-      decoration: const InputDecoration(
-        border: OutlineInputBorder(),
-        isDense: true,
-      ).copyWith(labelText: label),
-    );
-  }
-
-  Widget _buildTempRtcCard() {
-    final sub = TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w700);
-
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.thermostat, color: Colors.orange),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text("Room Temp", style: sub),
-                      const SizedBox(height: 2),
-                      Text(_temperatureText, style: const TextStyle(fontWeight: FontWeight.w800)),
-                    ],
-                  ),
-                ),
-                IconButton(icon: const Icon(Icons.refresh), onPressed: () => _sendCommand("GET_TEMP")),
-              ],
-            ),
-            const Divider(height: 18),
-            Row(
-              children: [
-                Icon(Icons.access_time, color: _blue),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text("Device RTC", style: sub),
-                      const SizedBox(height: 2),
-                      Text(_deviceTimeText, style: const TextStyle(fontWeight: FontWeight.w800)),
-                    ],
-                  ),
-                ),
-                IconButton(icon: const Icon(Icons.schedule), onPressed: () => _sendCommand("GET_TIME")),
-                IconButton(
-                  icon: const Icon(Icons.sync),
-                  onPressed: () {
-                    final now = DateTime.now();
-                    final formatted = DateFormat('yyyy-MM-dd HH:mm:ss').format(now);
-                    setState(() => _deviceTimeText = formatted);
-                    _sendCommand("SET_TIME:$formatted");
-                    Future.delayed(const Duration(milliseconds: 500), () {
-                      if (mounted) _sendCommand("GET_TIME");
-                    });
-                  },
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ===================== DEFAULT REMOTE DROPDOWN =====================
-  Widget _buildDefaultRemoteDropdown() {
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    "Default AC Remote",
-                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => setState(() => _showDefaultRemoteDropdown = !_showDefaultRemoteDropdown),
-                  icon: Icon(_showDefaultRemoteDropdown ? Icons.expand_less : Icons.expand_more),
-                ),
-              ],
-            ),
-            if (_showDefaultRemoteDropdown) ...[
-              const SizedBox(height: 10),
-
-              // brand selector for default sending
-              DropdownButtonFormField<String>(
-                value: _brandDropdownItems().contains(_defaultRemoteBrand) ? _defaultRemoteBrand : "Samsung",
-                items: _brandDropdownItems().map((b) => DropdownMenuItem(value: b, child: Text(b))).toList(),
-                onChanged: (v) {
-                  if (v == null) return;
-                  _setDefaultBrandOnDevice(v);
-                },
-                decoration: const InputDecoration(
-                  labelText: "Brand",
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  _remoteBtn("POWER ON", Icons.power_settings_new, () => _sendDefaultRemoteKey("POWER_ON")),
-                  _remoteBtn("TEMP +", Icons.arrow_upward, () => _sendDefaultRemoteKey("TEMPUP")),
-                  _remoteBtn("TEMP -", Icons.arrow_downward, () => _sendDefaultRemoteKey("TEMPDOWN")),
-                  _remoteBtn("SWING", Icons.swap_horiz, () => _sendDefaultRemoteKey("SWING")),
-                  _remoteBtn("MODE", Icons.tune, () => _sendDefaultRemoteKey("MODE")),
-                  _remoteBtn("POWER OFF", Icons.power_off, () => _sendDefaultRemoteKey("POWER_OFF")),
-                ],
-              ),
-
-              const SizedBox(height: 14),
-
-              // schedules (optional)
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _onTimeController,
-                      readOnly: true,
-                      decoration: const InputDecoration(
-                        labelText: "ON Time (HH:MM)",
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      onTap: () => _pickTime(_onTimeController, "SCHEDULE_ON"),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: _offTimeController,
-                      readOnly: true,
-                      decoration: const InputDecoration(
-                        labelText: "OFF Time (HH:MM)",
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      onTap: () => _pickTime(_offTimeController, "SCHEDULE_OFF"),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ===================== REMOTE CONFIG DROPDOWN =====================
-  Widget _buildRemoteConfigDropdown() {
-    final currentKey = _cfgKeys[_cfgStepIndex];
-
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    "Remote Configuration",
-                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => setState(() => _showRemoteConfigDropdown = !_showRemoteConfigDropdown),
-                  icon: Icon(_showRemoteConfigDropdown ? Icons.expand_less : Icons.expand_more),
-                ),
-              ],
-            ),
-            if (_showRemoteConfigDropdown) ...[
-              const SizedBox(height: 10),
-
-              DropdownButtonFormField<String>(
-                value: _brandDropdownItems().contains(_configBrand) ? _configBrand : "LG",
-                items: _brandDropdownItems().map((b) => DropdownMenuItem(value: b, child: Text(b))).toList(),
-                onChanged: (v) {
-                  if (v == null) return;
-                  _setConfigBrandOnDevice(v);
-                },
-                decoration: const InputDecoration(
-                  labelText: "Brand to Learn",
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _configMode ? null : _startConfigMode,
-                      icon: const Icon(Icons.play_arrow),
-                      label: const Text("Start Config"),
-                      style: ElevatedButton.styleFrom(backgroundColor: _themeGreen, foregroundColor: Colors.black),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: (!_configMode || _waitingForIr) ? null : _triggerCurrentKeyConfig,
-                      icon: const Icon(Icons.wifi_tethering),
-                      label: Text("Config $currentKey"),
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 12),
-
-              // Step indicator
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  "Step ${_cfgStepIndex + 1}/${_cfgKeys.length}  →  $currentKey",
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-              const SizedBox(height: 6),
-
-              // progress
-              LinearProgressIndicator(
-                value: (_learningProgress / 100.0).clamp(0.0, 1.0),
-                minHeight: 8,
-              ),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  _cfgStatus,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: _waitingForIr ? Colors.orange : Colors.black,
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              // Save button (enabled only after last step done message sets status)
-              ElevatedButton.icon(
-                onPressed: (_configMode == false && _cfgStatus.contains("All keys captured"))
-                    ? _showSaveRemoteDialog
-                    : (_cfgStatus.contains("All keys captured") ? _showSaveRemoteDialog : null),
-                icon: const Icon(Icons.save),
-                label: const Text("Save Remote"),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _remoteBtn(String label, IconData icon, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        width: 110,
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(color: _themeGreen, borderRadius: BorderRadius.circular(14)),
-        child: Column(
-          children: [
-            Icon(icon, color: Colors.black),
-            const SizedBox(height: 6),
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
           ],
         ),
       ),
@@ -1194,13 +892,14 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         alignment: Alignment.centerRight,
         child: TextButton.icon(
           onPressed: () => setState(() => _showTerminal = true),
-          icon: const Icon(Icons.developer_mode),
-          label: const Text("Show Logs"),
+          icon: const Icon(Icons.developer_mode, color: Colors.white70),
+          label: const Text("Show Logs", style: TextStyle(color: Colors.white70)),
         ),
       );
     }
 
     return Card(
+      color: _cardBackground,
       elevation: 2,
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -1210,8 +909,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
           children: [
             Row(
               children: [
-                const Expanded(child: Text("Terminal / Logs", style: TextStyle(fontWeight: FontWeight.w900))),
-                IconButton(onPressed: () => setState(() => _showTerminal = false), icon: const Icon(Icons.close)),
+                const Expanded(child: Text("Terminal / Logs", style: TextStyle(fontWeight: FontWeight.w900, color: Colors.white))),
+                IconButton(onPressed: () => setState(() => _showTerminal = false), icon: const Icon(Icons.close, color: Colors.white70)),
               ],
             ),
             const SizedBox(height: 8),
@@ -1223,7 +922,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
                 reverse: true,
                 child: Text(
                   _terminalController.text,
-                  style: const TextStyle(fontFamily: 'monospace', color: Colors.greenAccent, fontSize: 11),
+                  style: const TextStyle(fontFamily: 'monospace', color: _themeGreen, fontSize: 11),
                 ),
               ),
             ),
@@ -1237,11 +936,222 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   void _log(String msg) {
     final t = DateFormat("HH:mm:ss").format(DateTime.now());
     _terminalController.text += "[$t] $msg\n";
-    setState(() {});
+    
+    // Throttle UI updates for logs if they come in too fast
+    if (!_needsUpdate) {
+      _needsUpdate = true;
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted && _needsUpdate) {
+          setState(() {
+            _needsUpdate = false;
+          });
+        }
+      });
+    }
   }
 
   void _showSnack(String msg, Color c) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: c));
+  }
+
+  void _showWifiLoadingDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Center(
+        child: Container(
+          width: 100,
+          height: 100,
+          decoration: BoxDecoration(
+            color: _cardBackground,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.4),
+                blurRadius: 30,
+                offset: const Offset(0, 15),
+              ),
+              BoxShadow(
+                color: _themeGreen.withOpacity(0.15),
+                blurRadius: 20,
+                offset: const Offset(0, 0),
+              ),
+            ],
+          ),
+          child: Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(_themeGreen),
+              strokeWidth: 4.5,
+              strokeCap: StrokeCap.round,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _hideWifiLoadingDialog() {
+    if (_isConnectingWifi && mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+      setState(() => _isConnectingWifi = false);
+    }
+  }
+
+  void _showReconnectDialog() {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: _cardBackground,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.bluetooth_disabled, color: _red, size: 28),
+            const SizedBox(width: 12),
+            const Text(
+              "Bluetooth Disconnected",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Connection to ${_device.name ?? 'device'} lost.",
+              style: const TextStyle(fontSize: 15, color: Colors.white70),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _themeGreen.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _themeGreen.withOpacity(0.3)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.white70, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Device is still on. Ready to reconnect.",
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _disconnectBluetooth();
+            },
+            child: const Text(
+              "Go Back",
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _themeGreen,
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
+            onPressed: () {
+              Navigator.pop(context);
+              _attemptReconnect();
+            },
+            icon: const Icon(Icons.bluetooth_connected, size: 20),
+            label: const Text(
+              "Reconnect",
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _attemptReconnect() async {
+    _showLoadingDialog("Reconnecting...");
+    
+    try {
+      final connection = await BluetoothConnection.toAddress(_device.address);
+      if (connection.isConnected && mounted) {
+        _hideLoadingDialog();
+        setState(() {
+          _connection = connection;
+          _isConnected = true;
+          _isYellowLedOn = true;
+        });
+        _listenBluetooth();
+        _showSnack("Reconnected successfully ✅", _green);
+      }
+    } catch (e) {
+      if (mounted) {
+        _hideLoadingDialog();
+        _showSnack("Failed to reconnect. Try again.", _red);
+      }
+    }
+  }
+
+  void _showLoadingDialog(String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Center(
+        child: Container(
+          width: 100,
+          height: 100,
+          decoration: BoxDecoration(
+            color: _cardBackground,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.4),
+                blurRadius: 30,
+                offset: const Offset(0, 15),
+              ),
+              BoxShadow(
+                color: _themeGreen.withOpacity(0.15),
+                blurRadius: 20,
+                offset: const Offset(0, 0),
+              ),
+            ],
+          ),
+          child: Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(_themeGreen),
+              strokeWidth: 4.5,
+              strokeCap: StrokeCap.round,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _hideLoadingDialog() {
+    if (mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
   }
 
   void _disconnectBluetooth() {
@@ -1257,10 +1167,11 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: _background,
       appBar: AppBar(
-        title: const Text("Configuration", style: TextStyle(color: Colors.black, fontWeight: FontWeight.w900)),
+        title: const Text("Configuration", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
         backgroundColor: _themeGreen,
-        iconTheme: const IconThemeData(color: Colors.black),
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           IconButton(icon: const Icon(Icons.bluetooth_disabled), onPressed: _disconnectBluetooth),
         ],
@@ -1268,16 +1179,88 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       body: SingleChildScrollView(
         child: Column(
           children: [
-            _buildStatusCard(),
-            _buildWifiCard(),
-            _buildMqttDropdownCard(),
-            _buildTempRtcCard(),
-
-            // ✅ both required dropdowns
-            _buildRemoteConfigDropdown(), // remote learning
-            _buildDefaultRemoteDropdown(), // default remote control
-
-            _buildTerminal(),
+            RepaintBoundary(child: _buildStatusCard()),
+            RepaintBoundary(
+              child: WifiSectionWidget(
+              themeGreen: _themeGreen,
+              isWifiConnected: _isWifiConnected,
+              wifiStatus: _wifiStatus,
+              wifiIP: _wifiIP,
+              onShowWifiSetup: _showWifiSetupDialog,
+              showMqttDropdown: _showMqttDropdown,
+              onToggleMqttDropdown: () => setState(() => _showMqttDropdown = !_showMqttDropdown),
+              mqttStatus: _mqttStatus,
+              isMqttConnected: _isMqttConnected,
+              mqttHostController: _mqttHostController,
+              mqttPortController: _mqttPortController,
+              mqttTopicController: _mqttTopicController,
+              mqttUserController: _mqttUserController,
+              mqttPassController: _mqttPassController,
+              onSendMqttSettings: () => _sendMqttSettingsToDevice(connect: false),
+              onConnectMqtt: () => _sendMqttSettingsToDevice(connect: true),
+              autoControlEnabled: _autoControlEnabled,
+              onAutoControlChanged: (v) async {
+                setState(() => _autoControlEnabled = v);
+                await _saveAutoPrefs();
+                await _sendAutoSetpointsToDevice();
+              },
+              autoOnController: _autoOnController,
+              autoOffController: _autoOffController,
+              onApplyAutoConfig: _sendAutoSetpointsToDevice,
+            )),
+            RepaintBoundary(
+              child: TemperatureWidget(
+              temperatureText: _temperatureText,
+              deviceTimeText: _deviceTimeText,
+              onRefreshTemp: () => _sendCommand("GET_TEMP"),
+              onRefreshTime: () => _sendCommand("GET_TIME"),
+              onSyncTime: () {
+                final now = DateTime.now();
+                final formatted = DateFormat('yyyy-MM-dd HH:mm:ss').format(now);
+                setState(() => _deviceTimeText = formatted);
+                _sendCommand("SET_TIME:$formatted");
+                Future.delayed(const Duration(milliseconds: 500), () {
+                  if (mounted) _sendCommand("GET_TIME");
+                });
+              },
+            )),
+            RepaintBoundary(
+              child: ACControlWidget(
+              themeGreen: _themeGreen,
+              brandItems: _brandDropdownItems(),
+              showDefaultRemoteDropdown: _showDefaultRemoteDropdown,
+              onToggleDefaultRemoteDropdown: () =>
+                  setState(() => _showDefaultRemoteDropdown = !_showDefaultRemoteDropdown),
+              defaultRemoteBrand: _defaultRemoteBrand,
+              onDefaultBrandChanged: _setDefaultBrandOnDevice,
+              onPowerOn: () => _sendDefaultRemoteKey("POWER_ON"),
+              onPowerOff: () => _sendDefaultRemoteKey("POWER_OFF"),
+              onTempUp: () => _sendDefaultRemoteKey("TEMPUP"),
+              onTempDown: () => _sendDefaultRemoteKey("TEMPDOWN"),
+              onSwing: () => _sendDefaultRemoteKey("SWING"),
+              onMode: () => _sendDefaultRemoteKey("MODE"),
+              onTimeController: _onTimeController,
+              offTimeController: _offTimeController,
+              onPickOnTime: () => _pickTime(_onTimeController, "SCHEDULE_ON"),
+              onPickOffTime: () => _pickTime(_offTimeController, "SCHEDULE_OFF"),
+              showRemoteConfigDropdown: _showRemoteConfigDropdown,
+              onToggleRemoteConfigDropdown: () =>
+                  setState(() => _showRemoteConfigDropdown = !_showRemoteConfigDropdown),
+              configBrand: _configBrand,
+              onConfigBrandChanged: _setConfigBrandOnDevice,
+              configMode: _configMode,
+              waitingForIr: _waitingForIr,
+              cfgStepIndex: _cfgStepIndex,
+              cfgStepsCount: _cfgKeys.length,
+              learningProgress: _learningProgress,
+              cfgStatus: _cfgStatus,
+              currentCfgKey: _cfgKeys[_cfgStepIndex],
+              onStartConfigMode: _startConfigMode,
+              onTriggerCurrentKeyConfig: _triggerCurrentKeyConfig,
+              onShowSaveRemoteDialog: _showSaveRemoteDialog,
+              canSaveRemote: _cfgStatus.contains("All keys captured"),
+            )),
+            RepaintBoundary(child: _buildTerminal()),
             const SizedBox(height: 16),
           ],
         ),

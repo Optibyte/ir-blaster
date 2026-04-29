@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'login_page.dart';
+import 'package:esp/screens/ac_app/sigin.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -9,6 +9,8 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  static const Color _background = Color(0xFF1A1A2E);
+  static const Color _themeGreen = Color.fromARGB(255, 123, 159, 71);
 
   @override
   void initState() {
@@ -25,20 +27,20 @@ class _SplashScreenState extends State<SplashScreen> {
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => LoginPage()),
+      MaterialPageRoute(builder: (context) => const SignInPage()),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF00A8FF),
+      backgroundColor: _background,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Image.asset(
-              'assets/images/ir_icon.png',
+              'assets/images/logo.png',
               width: 100,
               height: 100,
             ),
@@ -60,8 +62,8 @@ class _SplashScreenState extends State<SplashScreen> {
               ),
             ),
             const SizedBox(height: 40),
-            const CircularProgressIndicator(
-              color: Colors.white,
+            CircularProgressIndicator(
+              color: _themeGreen,
             ),
           ],
         ),

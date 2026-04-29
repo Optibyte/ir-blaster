@@ -1,54 +1,147 @@
 import 'package:flutter/material.dart';
-import 'package:esp/screens/login_page.dart';
-import 'package:esp/screens/mode_selection_page.dart';
-import 'package:esp/auth/auth_service.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:provider/provider.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 
-void main() {
-  runApp(const MyApp());
+import 'package:esp/core/theme/app_theme.dart';
+import 'package:esp/core/theme/theme_provider.dart';
+import 'package:esp/core/constants/colors.dart';
+import 'package:esp/core/services/auth_service.dart' as ac_auth;
+import 'package:esp/screens/ac_app/sigin.dart';
+import 'package:esp/screens/main_navigation_page.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize Firebase
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    debugPrint('⚠️ Firebase Init Error: $e');
+  }
+
+  // Initialize Dotenv
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint('⚠️ Error loading .env: $e');
+  }
+
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => ThemeProvider(),
+      child: const MainApp(),
+    ),
+  );
 }
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
 
-  Future<Widget> getInitialScreen() async {
-    final AuthService authService = AuthService();
-    final isLoggedIn = await authService.isLoggedIn();
+class MainApp extends StatelessWidget {
+  const MainApp({super.key});
 
-    if (isLoggedIn) {
-      debugPrint('✅ User already logged in. Going to Mode Selection.');
-      return const ModeSelectionPage();
-    } else {
-      debugPrint('⚠️ User not logged in. Going to Login.');
-      return LoginPage();
-    }
+  @override
+  Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Optibyte - IR Blaster',
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: themeProvider.themeMode,
+      home: const _AuthGate(),
+    );
+  }
+}
+
+class _AuthGate extends StatefulWidget {
+  const _AuthGate();
+
+  @override
+  State<_AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<_AuthGate> {
+  late Future<Map<String, dynamic>?> _authFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _authFuture = _checkAuth();
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'IR-Blaster App',
-      theme: ThemeData(
-        primarySwatch: Colors.green,
-        scaffoldBackgroundColor: const Color(0xFFF0F8FF),
-      ),
-      home: FutureBuilder<Widget>(
-        future: getInitialScreen(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            );
-          } else {
-            return snapshot.data ?? LoginPage();
-          }
-        },
-      ),
-      routes: {
-        '/login': (context) => LoginPage(),
-        //'/register': (context) => RegisterPage(),
-        '/mode_selection': (context) => const ModeSelectionPage(),
-        // '/home': (context) => const HomePage(),
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: _authFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(color: Color(0xFF6CC042)),
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Connection Error',
+                    style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Please check your internet connection',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        _authFuture = _checkAuth();
+                      });
+                    },
+                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.button),
+                    child: Text('Retry', style: GoogleFonts.poppins(color: Colors.white)),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        // Authenticated
+        if (snapshot.data != null) {
+          return const MainNavigationPage();
+        }
+
+        // Not authenticated
+        return const SignInPage();
       },
     );
+  }
+
+  Future<Map<String, dynamic>?> _checkAuth() async {
+    final cachedUser = await ac_auth.AuthService.getUserData();
+    if (cachedUser != null) {
+      // ignore: unawaited_futures
+      ac_auth.AuthService.verify(); 
+      return cachedUser;
+    }
+
+    if (await ac_auth.AuthService.hasStoredSession()) {
+      return ac_auth.AuthService.verify();
+    }
+
+    return null;
   }
 }

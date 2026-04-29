@@ -38,5 +38,7 @@ class BluetoothService {
     });
   }
 
-  sendWifiCredentials(String ssid, String password) {}
+  Future<void> sendWifiCredentials(String ssid, String password) async {
+    await sendSimpleCommand("WIFI:$ssid,$password");
+  }
 }

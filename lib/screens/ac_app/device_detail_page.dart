@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:math' as math;
+import 'dart:ui';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -9,6 +10,9 @@ import 'dart:async';
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:esp/widgets/trends_table.dart';
+import 'package:esp/core/config/app_config.dart';
+import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_server_client.dart';
 
 class DeviceDetailPage extends StatefulWidget {
   final String deviceName;
@@ -30,7 +34,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     with SingleTickerProviderStateMixin {
   // UI State
   double _setTemperature = 24.0; // Fixed static value
-  double _actualTemperature = 34.4;
+  double _actualTemperature = 0.0;
   String _status = '--';
   int _humidity = 0;
   String _scheduleOn = '--:--';
@@ -38,6 +42,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   String _lunchOn = '--:--';
   String _lunchOff = '--:--';
   bool _isAuto = false;
+  bool _isPowerOn = true; // Tracks the MQTT Power Status
 
   // Chart & Log State
   final List<_ChartData> _tempHistory = [];
@@ -56,6 +61,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
   // Stream State
   StreamSubscription? _subscription;
+  DateTime _lastUpdateTime = DateTime.now(); // For throttling UI updates
 
   // Animation State
   AnimationController? _pulseController;
@@ -162,8 +168,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       '🔄 SWITCHING EQUIPMENT: ID=$equipmentId, Name=$name, ShortId=$shortId',
     );
     if (_selectedEquipmentId == equipmentId &&
-        _selectedEquipmentShortId.isNotEmpty)
-      return;
+        _selectedEquipmentShortId.isNotEmpty) return;
 
     _closeStream();
 
@@ -188,6 +193,72 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
       if (imei.isNotEmpty) {
         _connectToStream(imei);
+      } else {
+        setState(() => _isTelemetryLoading = false);
+      }
+    }
+  }
+
+  Future<void> _togglePower(bool value) async {
+    // Direct MQTT connection from Frontend
+    final client = MqttServerClient(
+        '13.66.130.236', 'flutter_ac_${DateTime.now().millisecondsSinceEpoch}');
+    client.port = 1883;
+    client.logging(on: false);
+    client.keepAlivePeriod = 20;
+
+    final connMessage = MqttConnectMessage()
+        .withClientIdentifier(
+            'flutter_ac_${DateTime.now().millisecondsSinceEpoch}')
+        .authenticateAs('demo', 'demo')
+        .startClean()
+        .withWillQos(MqttQos.atLeastOnce);
+    client.connectionMessage = connMessage;
+
+    // Optimistic UI update
+    setState(() => _isPowerOn = value);
+
+    try {
+      debugPrint('📡 MQTT [FRONTEND]: Connecting to 13.66.130.236...');
+      await client.connect();
+
+      if (client.connectionStatus!.state == MqttConnectionState.connected) {
+        debugPrint('✅ MQTT [FRONTEND]: Connected');
+
+        final payload = 'sustainabyte_demo:STATUS_${value ? "ON" : "OFF"}';
+        final builder = MqttClientPayloadBuilder();
+        builder.addString(payload);
+
+        debugPrint('📤 MQTT [FRONTEND]: Publishing "$payload" to topic "demo"');
+        client.publishMessage('demo', MqttQos.atLeastOnce, builder.payload!);
+
+        // Brief delay to ensure message is sent before disconnecting
+        await Future.delayed(const Duration(milliseconds: 500));
+        client.disconnect();
+        debugPrint('🔌 MQTT [FRONTEND]: Disconnected');
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content:
+                  Text('AC Power turned ${value ? 'ON' : 'OFF'} (via MQTT)'),
+              backgroundColor: value ? Colors.green : Colors.redAccent,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      } else {
+        throw Exception(
+            'Connection failed with state: ${client.connectionStatus!.state}');
+      }
+    } catch (e) {
+      debugPrint('❌ MQTT [FRONTEND] Error: $e');
+      setState(() => _isPowerOn = !value); // Rollback
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('MQTT Error: $e'), backgroundColor: Colors.orange),
+        );
       }
     }
   }
@@ -248,25 +319,38 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
       final response = await client.send(request);
 
-      _subscription = response.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter()) // Handle line-by-line JSON
-          .listen(
-            (line) {
-              if (line.trim().isEmpty) return;
-              debugPrint('📥 [HTTP Stream] Data: $line');
-              _parseAndMapData(line);
-            },
-            onError: (error) {
-              debugPrint('❌ [HTTP Stream] Error: $error');
-            },
-            onDone: () {
-              debugPrint('🔌 [HTTP Stream] Stream closed');
-              client.close();
-            },
-          );
+      if (response.statusCode == 200) {
+        if (mounted) {
+          setState(() => _isTelemetryLoading = false);
+        }
+        _subscription = response.stream
+            .transform(utf8.decoder)
+            .transform(const LineSplitter()) // Handle line-by-line JSON
+            .listen(
+          (line) {
+            if (line.trim().isEmpty) return;
+            debugPrint('📥 [HTTP Stream] Data: $line');
+            _parseAndMapData(line);
+          },
+          onError: (error) {
+            debugPrint('❌ [HTTP Stream] Error: $error');
+          },
+          onDone: () {
+            debugPrint('🔌 [HTTP Stream] Stream closed');
+            client.close();
+          },
+        );
+      } else {
+        debugPrint('❌ [HTTP Stream] Connection failed: ${response.statusCode}');
+        if (mounted) {
+          setState(() => _isTelemetryLoading = false);
+        }
+      }
     } catch (e) {
       debugPrint('❌ [HTTP Stream] Connection Exception: $e');
+      if (mounted) {
+        setState(() => _isTelemetryLoading = false);
+      }
     }
   }
 
@@ -301,10 +385,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
         int newHum = _humidity;
         if (payload['hum'] != null) {
-          newHum =
-              (double.tryParse(payload['hum'].toString()) ??
-                      _humidity.toDouble())
-                  .toInt();
+          newHum = (double.tryParse(payload['hum'].toString()) ??
+                  _humidity.toDouble())
+              .toInt();
           if (newHum != _humidity) hasChanges = true;
         }
 
@@ -318,15 +401,15 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
         String newSchOn = _scheduleOn;
         if (payload['schedule_on'] != null || payload['scheduleOn'] != null) {
-          newSchOn = (payload['schedule_on'] ?? payload['scheduleOn'])
-              .toString();
+          newSchOn =
+              (payload['schedule_on'] ?? payload['scheduleOn']).toString();
           if (newSchOn != _scheduleOn) hasChanges = true;
         }
 
         String newSchOff = _scheduleOff;
         if (payload['schedule_off'] != null || payload['scheduleOff'] != null) {
-          newSchOff = (payload['schedule_off'] ?? payload['scheduleOff'])
-              .toString();
+          newSchOff =
+              (payload['schedule_off'] ?? payload['scheduleOff']).toString();
           if (newSchOff != _scheduleOff) hasChanges = true;
         }
 
@@ -338,8 +421,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
         String newLunchOff = _lunchOff;
         if (payload['lunch_off'] != null || payload['lunchOff'] != null) {
-          newLunchOff = (payload['lunch_off'] ?? payload['lunchOff'])
-              .toString();
+          newLunchOff =
+              (payload['lunch_off'] ?? payload['lunchOff']).toString();
           if (newLunchOff != _lunchOff) hasChanges = true;
         }
 
@@ -352,7 +435,13 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         if (_isTelemetryLoading)
           hasChanges = true; // Always update on first data
 
-        if (hasChanges) {
+        final now = DateTime.now();
+        final shouldUpdateUI = hasChanges &&
+            (now.difference(_lastUpdateTime).inMilliseconds > 500 ||
+                _isTelemetryLoading);
+
+        if (shouldUpdateUI) {
+          _lastUpdateTime = now;
           setState(() {
             _isTelemetryLoading = false;
             _actualTemperature = newTemp;
@@ -370,8 +459,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
             // Update Logs
             _recentLogs.insert(0, {
-              'time':
-                  payload!['time'] ??
+              'time': payload!['time'] ??
                   DateTime.now().toString().split('.').first,
               'temp': _actualTemperature.toStringAsFixed(1),
               'hum': _humidity,
@@ -392,7 +480,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF1B172E) : Colors.white,
+      backgroundColor: isDark ? const Color(0xFF1B172E) : const Color(0xFFF8FAFC),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -453,7 +541,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                     actualTemp: _actualTemperature,
                     isDark: isDark,
                     colorScheme: colorScheme,
-                    onTap: () => _showActualTempPopup(_actualTemperature),
+                    onTap: () {}, // Disabled interaction
                   ),
                 ),
                 const SizedBox(height: 32),
@@ -465,24 +553,6 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           if (_isLoadingEquipments || _isTelemetryLoading)
             Positioned.fill(child: _buildFullPageSkeleton(isDark)),
         ],
-      ),
-      floatingActionButton: _actionPill(
-        icon: Icons.tune_rounded,
-        label: 'Controls',
-        color: const Color(0xFF6CC042),
-        isDark: isDark,
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => _DeviceControlPage(
-                equipmentName: _selectedEquipmentName,
-                initialTemp: _setTemperature,
-                actualTemp: _actualTemperature,
-              ),
-            ),
-          );
-        },
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
@@ -702,28 +772,28 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   }
 
   Widget _tableHeader(String text, bool isDark) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 8),
-    child: Text(
-      text,
-      style: GoogleFonts.poppins(
-        color: Colors.white24,
-        fontSize: 9,
-        fontWeight: FontWeight.bold,
-      ),
-    ),
-  );
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text(
+          text,
+          style: GoogleFonts.poppins(
+            color: Colors.white24,
+            fontSize: 9,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      );
 
   Widget _tableCell(String text, bool isDark, {Color? color}) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 8),
-    child: Text(
-      text,
-      style: GoogleFonts.poppins(
-        color: color ?? (isDark ? Colors.white70 : Colors.black87),
-        fontSize: 11,
-        fontWeight: FontWeight.w500,
-      ),
-    ),
-  );
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text(
+          text,
+          style: GoogleFonts.poppins(
+            color: color ?? (isDark ? Colors.white70 : Colors.black87),
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      );
 
   void _showDataInsights(bool isDark) async {
     final companyId = await AuthService.getCompanyId() ?? '';
@@ -773,9 +843,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       child: Row(
         children: [
           // First two equipments
-          ..._equipmentsData
-              .take(2)
-              .map(
+          ..._equipmentsData.take(2).map(
                 (e) => _buildTab(
                   e['name']?.toString() ?? 'N/A',
                   e['equipmentId']?.toString() == _selectedEquipmentId,
@@ -805,7 +873,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                   Text(
                     'More',
                     style: GoogleFonts.poppins(
-                      color: Colors.white70,
+                      color: isDark ? Colors.white70 : Colors.black54,
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                     ),
@@ -892,8 +960,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               : null,
           color: !isActive
               ? (isDark
-                    ? Colors.white.withOpacity(0.05)
-                    : Colors.grey.withOpacity(0.1))
+                  ? Colors.white.withOpacity(0.05)
+                  : Colors.grey.withOpacity(0.1))
               : null,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
@@ -906,7 +974,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         child: Text(
           label,
           style: GoogleFonts.poppins(
-            color: isActive ? const Color(0xFF0EA5E9) : Colors.white70,
+            color: isActive 
+                ? const Color(0xFF0EA5E9) 
+                : (isDark ? Colors.white70 : Colors.black54),
             fontSize: 12,
             fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
           ),
@@ -919,7 +989,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1B172E),
+        backgroundColor: isDark ? const Color(0xFF1B172E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -927,7 +997,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             Text(
               'Select Equipment',
               style: GoogleFonts.poppins(
-                color: Colors.white,
+                color: isDark ? Colors.white : const Color(0xFF1B172E),
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
               ),
@@ -973,12 +1043,16 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                 },
                 leading: Icon(
                   Icons.ac_unit,
-                  color: isSelected ? const Color(0xFF6CC042) : Colors.white24,
+                  color: isSelected 
+                      ? const Color(0xFF6CC042) 
+                      : (isDark ? Colors.white24 : Colors.black26),
                 ),
                 title: Text(
                   e,
                   style: GoogleFonts.poppins(
-                    color: isSelected ? Colors.white : Colors.white60,
+                    color: isSelected 
+                        ? (isDark ? Colors.white : const Color(0xFF1B172E)) 
+                        : (isDark ? Colors.white60 : Colors.black54),
                     fontSize: 14,
                     fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                   ),
@@ -995,17 +1069,89 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   }
 
   void _showActualTempPopup(double temp) {
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Actual Temperature: ${temp.toStringAsFixed(1)}°C',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withOpacity(0.3),
+      isScrollControlled: true,
+      builder: (context) => Container(
+        height: 280,
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: const Color(0xFF1B172E),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(40)),
+          border: Border.all(
+              color: const Color(0xFF6CC042).withOpacity(0.3), width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF6CC042).withOpacity(0.1),
+              blurRadius: 30,
+              offset: const Offset(0, -10),
+            ),
+          ],
         ),
-        backgroundColor: const Color(0xFF6CC042),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-        margin: const EdgeInsets.only(bottom: 100, left: 24, right: 24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 24),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Icon(
+              Icons.cloud_queue_rounded,
+              color: const Color(0xFF6CC042),
+              size: 54,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'CURRENT TEMPERATURE',
+              style: GoogleFonts.poppins(
+                color: Colors.white38,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 2,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${temp.toStringAsFixed(1)}°C',
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontSize: 56,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF6CC042).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.water_drop_rounded,
+                      color: Color(0xFF6CC042), size: 16),
+                  const SizedBox(width: 8),
+                  Text(
+                    'HUMIDITY: $_humidity%',
+                    style: GoogleFonts.poppins(
+                      color: const Color(0xFF6CC042),
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1074,8 +1220,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               color: isActive
                   ? activeColor.withOpacity(0.15)
                   : (isDark
-                        ? Colors.white.withOpacity(0.05)
-                        : Colors.black.withOpacity(0.05)),
+                      ? Colors.white.withOpacity(0.05)
+                      : Colors.black.withOpacity(0.05)),
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
                 color: isActive
@@ -1148,11 +1294,19 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withOpacity(0.05)
-            : Colors.grey.withOpacity(0.05),
+        color: isDark ? const Color(0xFF26213A) : Colors.white,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        border: Border.all(
+          color: isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFE2E8F0),
+        ),
+        boxShadow: [
+          if (!isDark)
+            BoxShadow(
+              color: const Color(0xFF0F172A).withOpacity(0.05),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1160,28 +1314,58 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'AC STATUS',
-                style: GoogleFonts.poppins(
-                  color: Colors.white24,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.2,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'AC STATUS',
+                    style: GoogleFonts.poppins(
+                      color: isDark ? Colors.white24 : Colors.black45,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  _isPowerOn
+                      ? Text('ONLINE',
+                          style: GoogleFonts.poppins(
+                              color: const Color(0xFF6CC042),
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold))
+                      : Text('OFFLINE',
+                          style: GoogleFonts.poppins(
+                              color: Colors.redAccent,
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold)),
+                ],
+              ),
+              const Spacer(),
+              Transform.scale(
+                scale: 0.8,
+                child: Switch(
+                  value: _isPowerOn,
+                  onChanged: _togglePower,
+                  activeColor: const Color(0xFF6CC042),
+                  activeTrackColor: const Color(0xFF6CC042).withOpacity(0.1),
+                  inactiveThumbColor: isDark ? Colors.white24 : Colors.grey.shade400,
+                  inactiveTrackColor: isDark ? Colors.white.withOpacity(0.05) : Colors.grey.shade200,
                 ),
               ),
+              const SizedBox(width: 4),
               Container(
                 width: 8,
                 height: 8,
                 decoration: BoxDecoration(
-                  color: isActive ? const Color(0xFF6CC042) : Colors.redAccent,
+                  color:
+                      _isPowerOn ? const Color(0xFF6CC042) : Colors.redAccent,
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color:
-                          (isActive
-                                  ? const Color(0xFF6CC042)
-                                  : Colors.redAccent)
-                              .withOpacity(0.5),
+                      color: (_isPowerOn
+                              ? const Color(0xFF6CC042)
+                              : Colors.redAccent)
+                          .withOpacity(0.5),
                       blurRadius: 8,
                       spreadRadius: 2,
                     ),
@@ -1200,7 +1384,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               ),
               const SizedBox(width: 12),
               Text(
-                _status.toUpperCase(),
+                _isPowerOn ? 'ACTIVE' : 'INACTIVE',
                 style: GoogleFonts.poppins(
                   color: isDark ? Colors.white : Colors.black,
                   fontSize: 16,
@@ -1218,11 +1402,19 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withOpacity(0.05)
-            : Colors.grey.withOpacity(0.05),
+        color: isDark ? const Color(0xFF26213A) : Colors.white,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        border: Border.all(
+          color: isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFE2E8F0),
+        ),
+        boxShadow: [
+          if (!isDark)
+            BoxShadow(
+              color: const Color(0xFF0F172A).withOpacity(0.05),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1230,7 +1422,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           Text(
             'HUMIDITY',
             style: GoogleFonts.poppins(
-              color: Colors.white24,
+              color: isDark ? Colors.white24 : Colors.black45,
               fontSize: 10,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.2,
@@ -1281,100 +1473,142 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     double start = _parseTimeToDouble(_scheduleOn);
     double end = _parseTimeToDouble(_scheduleOff);
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withOpacity(0.05)
-            : Colors.grey.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(28),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                'Daily Schedule',
-                style: GoogleFonts.poppins(
-                  color: isDark ? Colors.white : Colors.black,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const Spacer(),
-              _isAuto ? _buildAutoBadge() : const SizedBox(),
-            ],
+    return GestureDetector(
+      onTap: () => _showSchedulePicker(isDark),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF26213A) : Colors.white,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFE2E8F0),
           ),
-          const SizedBox(height: 24),
-          // Sun & Moon Timeline with Pins
-          Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _timePin('00', isDark),
-                  _timePin('06', isDark),
-                  _timePin('12', isDark),
-                  _timePin('18', isDark),
-                  _timePin('24', isDark),
-                ],
+          boxShadow: [
+            if (!isDark)
+              BoxShadow(
+                color: const Color(0xFF0F172A).withOpacity(0.05),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
               ),
-              const SizedBox(height: 4),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final totalWidth = constraints.maxWidth;
-                  final left = (start / 24) * totalWidth;
-                  final width = ((end - start) / 24) * totalWidth;
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Daily Schedule',
+                  style: GoogleFonts.poppins(
+                    color: isDark ? Colors.white : Colors.black,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                _isAuto ? _buildAutoBadge() : const SizedBox(),
+              ],
+            ),
+            const SizedBox(height: 24),
+            // Sun & Moon Timeline with Pins
+            Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _timePin('00', isDark),
+                    _timePin('06', isDark),
+                    _timePin('12', isDark),
+                    _timePin('18', isDark),
+                    _timePin('24', isDark),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final totalWidth = constraints.maxWidth;
+                    final left = (start / 24) * totalWidth;
+                    final width = ((end - start) / 24) * totalWidth;
 
-                  return Stack(
-                    children: [
-                      Container(
-                        height: 12,
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: Colors.white10,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                      ),
-                      Positioned(
-                        left: left,
-                        width: width.clamp(0, totalWidth - left),
-                        child: Container(
-                          height: 12,
+                    return Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // Background Track with Day/Night Hint
+                        Container(
+                          height: 14,
+                          width: double.infinity,
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                const Color(0xFF6CC042),
-                                const Color(0xFF6CC042).withOpacity(0.6),
-                              ],
-                            ),
-                            borderRadius: BorderRadius.circular(6),
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF6CC042).withOpacity(0.3),
-                                blurRadius: 8,
-                                spreadRadius: 1,
-                              ),
+                            gradient: isDark
+                                ? LinearGradient(
+                                    colors: [
+                                      Colors.white.withOpacity(0.05),
+                                      Colors.white.withOpacity(0.08),
+                                    ],
+                                  )
+                                : LinearGradient(
+                                    colors: [
+                                      const Color(0xFFE0F2FE), // Light sky blue
+                                      const Color(0xFFF1F5F9), // Light grey
+                                    ],
+                                  ),
+                            borderRadius: BorderRadius.circular(7),
+                          ),
+                        ),
+                        // Contextual Icons
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Icon(Icons.nights_stay_rounded, 
+                                  color: isDark ? Colors.white10 : Colors.black.withOpacity(0.2), size: 10),
+                              Icon(Icons.wb_sunny_rounded, 
+                                  color: isDark ? Colors.white10 : Colors.orange.withOpacity(0.4), size: 10),
+                              Icon(Icons.nights_stay_rounded, 
+                                  color: isDark ? Colors.white10 : Colors.black.withOpacity(0.2), size: 10),
                             ],
                           ),
                         ),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _timeSimpleLabel('FROM', _scheduleOn, isDark),
-              _timeSimpleLabel('TO', _scheduleOff, isDark),
-            ],
-          ),
-        ],
+                        // Active Schedule Range
+                        Positioned(
+                          left: left,
+                          width: width.clamp(0, totalWidth - left),
+                          child: Container(
+                            height: 14,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [
+                                  Color(0xFF6CC042),
+                                  Color(0xFF86EFAC),
+                                ],
+                              ),
+                              borderRadius: BorderRadius.circular(7),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF6CC042).withOpacity(0.3),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _timeSimpleLabel('FROM', _scheduleOn, isDark),
+                _timeSimpleLabel('TO', _scheduleOff, isDark),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1394,14 +1628,13 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
   Widget _timeSimpleLabel(String label, String time, bool isDark) {
     return Column(
-      crossAxisAlignment: label == 'FROM'
-          ? CrossAxisAlignment.start
-          : CrossAxisAlignment.end,
+      crossAxisAlignment:
+          label == 'FROM' ? CrossAxisAlignment.start : CrossAxisAlignment.end,
       children: [
         Text(
           label,
           style: GoogleFonts.poppins(
-            color: Colors.white24,
+            color: isDark ? Colors.white24 : Colors.black45,
             fontSize: 8,
             fontWeight: FontWeight.bold,
           ),
@@ -1422,7 +1655,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     return Text(
       time,
       style: GoogleFonts.poppins(
-        color: Colors.white.withOpacity(0.15),
+        color: isDark ? Colors.white.withOpacity(0.15) : Colors.black.withOpacity(0.4),
         fontSize: 8,
         fontWeight: FontWeight.bold,
       ),
@@ -1436,10 +1669,19 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withOpacity(0.05)
-            : Colors.grey.withOpacity(0.05),
+        color: isDark ? const Color(0xFF26213A) : Colors.white,
         borderRadius: BorderRadius.circular(28),
+        border: Border.all(
+          color: isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFE2E8F0),
+        ),
+        boxShadow: [
+          if (!isDark)
+            BoxShadow(
+              color: const Color(0xFF0F172A).withOpacity(0.05),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+        ],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -1455,7 +1697,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                 width: 12,
                 height: totalHeight,
                 decoration: BoxDecoration(
-                  color: Colors.white10,
+                  color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Stack(
@@ -1533,13 +1775,14 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   }
 
   Widget _lunchTimeRow(String label, String time) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
           label,
           style: GoogleFonts.poppins(
-            color: Colors.white24,
+            color: isDark ? Colors.white24 : Colors.black26,
             fontSize: 9,
             fontWeight: FontWeight.bold,
           ),
@@ -1547,7 +1790,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         Text(
           time,
           style: GoogleFonts.poppins(
-            color: Colors.white,
+            color: isDark ? Colors.white : Colors.black,
             fontSize: 16,
             fontWeight: FontWeight.bold,
           ),
@@ -1558,14 +1801,13 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
   Widget _lunchSimpleLabel(String label, String time, bool isDark) {
     return Column(
-      crossAxisAlignment: label == 'START'
-          ? CrossAxisAlignment.start
-          : CrossAxisAlignment.end,
+      crossAxisAlignment:
+          label == 'START' ? CrossAxisAlignment.start : CrossAxisAlignment.end,
       children: [
         Text(
           label,
           style: GoogleFonts.poppins(
-            color: Colors.white24,
+            color: isDark ? Colors.white24 : Colors.black26,
             fontSize: 8,
             fontWeight: FontWeight.bold,
           ),
@@ -1624,7 +1866,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               height: 6,
               width: double.infinity,
               decoration: BoxDecoration(
-                color: Colors.white10,
+                color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(3),
               ),
             ),
@@ -1654,7 +1896,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         Text(
           label,
           style: GoogleFonts.poppins(
-            color: Colors.white24,
+            color: isDark ? Colors.white24 : Colors.black45,
             fontSize: 8,
             fontWeight: FontWeight.bold,
             letterSpacing: 1,
@@ -1666,9 +1908,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
   Widget _timeLabel(String time, String type, Color color) {
     return Column(
-      crossAxisAlignment: type == 'START'
-          ? CrossAxisAlignment.start
-          : CrossAxisAlignment.end,
+      crossAxisAlignment:
+          type == 'START' ? CrossAxisAlignment.start : CrossAxisAlignment.end,
       children: [
         Text(
           type,
@@ -1746,6 +1987,60 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       ),
     );
   }
+
+  void _showSchedulePicker(bool isDark) {
+    showDialog(
+      context: context,
+      builder: (context) => _ScheduleControlDialog(
+        isDark: isDark,
+        initialOn: _scheduleOn,
+        initialOff: _scheduleOff,
+        onCommand: (type, time) => _publishMqttSchedule(type, time),
+        onClear: () => _publishMqttSchedule('SCH_CLEAR', null),
+      ),
+    );
+  }
+
+  Future<void> _publishMqttSchedule(String type, String? time) async {
+    final client = MqttServerClient('13.66.130.236',
+        'flutter_sch_${DateTime.now().millisecondsSinceEpoch}');
+    client.port = 1883;
+    client.logging(on: false);
+    client.keepAlivePeriod = 20;
+
+    final connMessage = MqttConnectMessage()
+        .withClientIdentifier(
+            'flutter_sch_${DateTime.now().millisecondsSinceEpoch}')
+        .authenticateAs('demo', 'demo')
+        .startClean()
+        .withWillQos(MqttQos.atLeastOnce);
+    client.connectionMessage = connMessage;
+
+    try {
+      debugPrint('📡 MQTT [SCH]: Connecting...');
+      await client.connect();
+      if (client.connectionStatus!.state == MqttConnectionState.connected) {
+        String payload = 'sustainabyte_demo:$type';
+        if (time != null) payload += ':$time';
+        final builder = MqttClientPayloadBuilder();
+        builder.addString(payload);
+        debugPrint('📤 MQTT [SCH]: Publishing "$payload"');
+        client.publishMessage('demo', MqttQos.atLeastOnce, builder.payload!);
+        await Future.delayed(const Duration(milliseconds: 500));
+        client.disconnect();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text('Command Sent: $type'),
+                backgroundColor: const Color(0xFF6CC042),
+                behavior: SnackBarBehavior.floating),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ MQTT [SCH] Error: $e');
+    }
+  }
 }
 
 class _ThermostatGauge extends StatelessWidget {
@@ -1808,7 +2103,7 @@ class _ThermostatGauge extends StatelessWidget {
                       '${setTemp.toInt()}°C',
                       style: GoogleFonts.poppins(
                         color: isDark ? Colors.white : const Color(0xFF1B172E),
-                        fontSize: 48,
+                        fontSize: 54,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -1818,8 +2113,9 @@ class _ThermostatGauge extends StatelessWidget {
                       style: GoogleFonts.poppins(
                         color: (isDark ? Colors.white : colorScheme.primary)
                             .withOpacity(0.5),
-                        fontSize: 10,
+                        fontSize: 16,
                         fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2,
                       ),
                     ),
                   ],
@@ -1969,8 +2265,8 @@ class _ThermostatPainter extends CustomPainter {
         ..color = isActive
             ? activeColor
             : (isDark
-                  ? Colors.white.withOpacity(0.1)
-                  : Colors.black.withOpacity(0.1))
+                ? Colors.white.withOpacity(0.1)
+                : Colors.black.withOpacity(0.1))
         ..strokeWidth = 1.5;
       final innerR = radius - 45;
       final outerR = radius - 30;
@@ -2181,7 +2477,8 @@ class _TrendsPage extends StatefulWidget {
   State<_TrendsPage> createState() => _TrendsPageState();
 }
 
-class _TrendsPageState extends State<_TrendsPage> with AutomaticKeepAliveClientMixin {
+class _TrendsPageState extends State<_TrendsPage>
+    with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
   List<dynamic> _parameters = [];
@@ -2240,9 +2537,9 @@ class _TrendsPageState extends State<_TrendsPage> with AutomaticKeepAliveClientM
                   name.contains('status') ||
                   name.contains('on/off');
             });
-            _selectedParamId =
-                _parameters[smartIndex != -1 ? smartIndex : 0]['shortId']
-                    ?.toString();
+            _selectedParamId = _parameters[smartIndex != -1 ? smartIndex : 0]
+                    ['shortId']
+                ?.toString();
             _fetchChartData();
           }
           _isLoading = false;
@@ -2298,7 +2595,7 @@ class _TrendsPageState extends State<_TrendsPage> with AutomaticKeepAliveClientM
 
       if (response.statusCode == 200) {
         final points = _parseChartDataInBackground(response.body);
-        
+
         if (mounted) {
           setState(() {
             _chartData = points;
@@ -2446,7 +2743,6 @@ class _TrendsPageState extends State<_TrendsPage> with AutomaticKeepAliveClientM
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 20),
-
                   Row(
                     children: [
                       Expanded(
@@ -2514,9 +2810,7 @@ class _TrendsPageState extends State<_TrendsPage> with AutomaticKeepAliveClientM
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 24),
-
                   Container(
                     height: 300,
                     padding: const EdgeInsets.all(16),
@@ -2529,89 +2823,93 @@ class _TrendsPageState extends State<_TrendsPage> with AutomaticKeepAliveClientM
                     child: _isChartLoading
                         ? _buildChartSkeleton(isDark)
                         : _chartData.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.query_stats_rounded,
-                                  color: Colors.white.withOpacity(0.1),
-                                  size: 48,
+                            ? Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.query_stats_rounded,
+                                      color: Colors.white.withOpacity(0.1),
+                                      size: 48,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      'No Data Available',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.white.withOpacity(0.2),
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'No Data Available',
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.white.withOpacity(0.2),
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500,
+                              )
+                            : SfCartesianChart(
+                                margin: EdgeInsets.zero,
+                                plotAreaBorderWidth: 0,
+                                primaryXAxis: DateTimeAxis(
+                                  dateFormat: DateFormat('h:mm a'),
+                                  majorGridLines:
+                                      const MajorGridLines(width: 0),
+                                  axisLine: const AxisLine(width: 0),
+                                  labelStyle: GoogleFonts.poppins(
+                                    color: Colors.white24,
+                                    fontSize: 9,
                                   ),
                                 ),
-                              ],
-                            ),
-                          )
-                        : SfCartesianChart(
-                            margin: EdgeInsets.zero,
-                            plotAreaBorderWidth: 0,
-                            primaryXAxis: DateTimeAxis(
-                              dateFormat: DateFormat('h:mm a'),
-                              majorGridLines: const MajorGridLines(width: 0),
-                              axisLine: const AxisLine(width: 0),
-                              labelStyle: GoogleFonts.poppins(
-                                color: Colors.white24,
-                                fontSize: 9,
-                              ),
-                            ),
-                            primaryYAxis: NumericAxis(
-                              majorGridLines: MajorGridLines(
-                                width: 1,
-                                color: Colors.white.withOpacity(0.05),
-                                dashArray: const [5, 5],
-                              ),
-                              axisLine: const AxisLine(width: 0),
-                              labelStyle: GoogleFonts.poppins(
-                                color: Colors.white24,
-                                fontSize: 9,
-                              ),
-                            ),
-                            series: <CartesianSeries<_ChartData, DateTime>>[
-                              AreaSeries<_ChartData, DateTime>(
-                                dataSource: _chartData,
-                                xValueMapper: (_ChartData data, _) => data.time,
-                                yValueMapper: (_ChartData data, _) => data.temp,
-                                color: const Color(
-                                  0xFFD4145A,
-                                ), // Pink/Magenta from image
-                                borderColor: const Color(0xFFFF2D55),
-                                borderWidth: 2,
-                                gradient: LinearGradient(
-                                  colors: [
-                                    const Color(0xFFD4145A).withOpacity(0.4),
-                                    const Color(0xFFD4145A).withOpacity(0.0),
-                                  ],
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
+                                primaryYAxis: NumericAxis(
+                                  majorGridLines: MajorGridLines(
+                                    width: 1,
+                                    color: Colors.white.withOpacity(0.05),
+                                    dashArray: const [5, 5],
+                                  ),
+                                  axisLine: const AxisLine(width: 0),
+                                  labelStyle: GoogleFonts.poppins(
+                                    color: Colors.white24,
+                                    fontSize: 9,
+                                  ),
                                 ),
-                                animationDuration: 0,
-                              ),
-                            ],
-                            trackballBehavior: TrackballBehavior(
-                              enable: true,
-                              activationMode: ActivationMode.singleTap,
-                              tooltipSettings: InteractiveTooltip(
-                                enable: true,
-                                format: 'point.x : point.y',
-                                color: const Color(0xFFD4145A),
-                                textStyle: GoogleFonts.poppins(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
+                                series: <CartesianSeries<_ChartData, DateTime>>[
+                                  AreaSeries<_ChartData, DateTime>(
+                                    dataSource: _chartData,
+                                    xValueMapper: (_ChartData data, _) =>
+                                        data.time,
+                                    yValueMapper: (_ChartData data, _) =>
+                                        data.temp,
+                                    color: const Color(
+                                      0xFFD4145A,
+                                    ), // Pink/Magenta from image
+                                    borderColor: const Color(0xFFFF2D55),
+                                    borderWidth: 2,
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        const Color(0xFFD4145A)
+                                            .withOpacity(0.4),
+                                        const Color(0xFFD4145A)
+                                            .withOpacity(0.0),
+                                      ],
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                    ),
+                                    animationDuration: 0,
+                                  ),
+                                ],
+                                trackballBehavior: TrackballBehavior(
+                                  enable: true,
+                                  activationMode: ActivationMode.singleTap,
+                                  tooltipSettings: InteractiveTooltip(
+                                    enable: true,
+                                    format: 'point.x : point.y',
+                                    color: const Color(0xFFD4145A),
+                                    textStyle: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
                   ),
-
                   const SizedBox(height: 24),
                   TrendsTable(
                     isDark: isDark,
@@ -2865,7 +3163,7 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
               ],
             ),
             const SizedBox(height: 25),
-            
+
             // Humidity Control
             _buildControlCard(
               title: 'HUMIDITY',
@@ -2873,8 +3171,10 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
               icon: Icons.water_drop_rounded,
               color: Colors.blueAccent,
               isDark: isDark,
-              onIncrement: () => setState(() => _humidity = math.min(100, _humidity + 5)),
-              onDecrement: () => setState(() => _humidity = math.max(0, _humidity - 5)),
+              onIncrement: () =>
+                  setState(() => _humidity = math.min(100, _humidity + 5)),
+              onDecrement: () =>
+                  setState(() => _humidity = math.max(0, _humidity - 5)),
             ),
             const SizedBox(height: 15),
 
@@ -2905,7 +3205,7 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
               onEndTimeTap: () => _selectTime(false, false),
             ),
             const SizedBox(height: 25),
-            
+
             // SET Button
             SizedBox(
               width: double.infinity,
@@ -2958,7 +3258,9 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
         color: cardColor,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.05),
+          color: isDark
+              ? Colors.white.withOpacity(0.06)
+              : Colors.black.withOpacity(0.05),
         ),
       ),
       child: Column(
@@ -3024,7 +3326,9 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
         color: cardColor,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.05),
+          color: isDark
+              ? Colors.white.withOpacity(0.06)
+              : Colors.black.withOpacity(0.05),
         ),
       ),
       child: Column(
@@ -3079,7 +3383,8 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
     );
   }
 
-  Widget _timePickerButton(String label, String time, bool isDark, VoidCallback onTap) {
+  Widget _timePickerButton(
+      String label, String time, bool isDark, VoidCallback onTap) {
     final textColor = isDark ? Colors.white : const Color(0xFF1B172E);
     return GestureDetector(
       onTap: onTap,
@@ -3108,42 +3413,52 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
     );
   }
 
-  Widget _circleButton(IconData icon, bool isDark, VoidCallback onTap, {double size = 40}) {
+  Widget _circleButton(IconData icon, bool isDark, VoidCallback onTap,
+      {double size = 40}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         width: size,
         height: size,
         decoration: BoxDecoration(
-          color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05),
+          color: isDark
+              ? Colors.white.withOpacity(0.08)
+              : Colors.black.withOpacity(0.05),
           shape: BoxShape.circle,
           border: Border.all(
-            color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.1),
+            color: isDark
+                ? Colors.white.withOpacity(0.1)
+                : Colors.black.withOpacity(0.1),
           ),
         ),
-        child: Icon(icon, color: isDark ? Colors.white : Colors.black87, size: size * 0.5),
+        child: Icon(icon,
+            color: isDark ? Colors.white : Colors.black87, size: size * 0.5),
       ),
     );
   }
 
   Future<void> _selectTime(bool isSchedule, bool isStart) async {
-    final initialTime = isSchedule 
+    final initialTime = isSchedule
         ? (isStart ? _scheduleStartTime : _scheduleEndTime)
         : (isStart ? _lunchStartTime : _lunchEndTime);
-        
+
     final TimeOfDay? picked = await showDialog<TimeOfDay>(
       context: context,
       builder: (context) => _CustomTimePickerDialog(initialTime: initialTime),
     );
-    
+
     if (picked != null) {
       setState(() {
         if (isSchedule) {
-          if (isStart) _scheduleStartTime = picked;
-          else _scheduleEndTime = picked;
+          if (isStart)
+            _scheduleStartTime = picked;
+          else
+            _scheduleEndTime = picked;
         } else {
-          if (isStart) _lunchStartTime = picked;
-          else _lunchEndTime = picked;
+          if (isStart)
+            _lunchStartTime = picked;
+          else
+            _lunchEndTime = picked;
         }
       });
     }
@@ -3155,7 +3470,8 @@ class _CustomTimePickerDialog extends StatefulWidget {
   const _CustomTimePickerDialog({required this.initialTime});
 
   @override
-  State<_CustomTimePickerDialog> createState() => _CustomTimePickerDialogState();
+  State<_CustomTimePickerDialog> createState() =>
+      _CustomTimePickerDialogState();
 }
 
 class _CustomTimePickerDialogState extends State<_CustomTimePickerDialog> {
@@ -3166,7 +3482,9 @@ class _CustomTimePickerDialogState extends State<_CustomTimePickerDialog> {
   @override
   void initState() {
     super.initState();
-    _hour = widget.initialTime.hourOfPeriod == 0 ? 12 : widget.initialTime.hourOfPeriod;
+    _hour = widget.initialTime.hourOfPeriod == 0
+        ? 12
+        : widget.initialTime.hourOfPeriod;
     _minute = widget.initialTime.minute;
     _period = widget.initialTime.period == DayPeriod.am ? 'AM' : 'PM';
   }
@@ -3206,7 +3524,7 @@ class _CustomTimePickerDialogState extends State<_CustomTimePickerDialog> {
               ],
             ),
             const SizedBox(height: 30),
-            
+
             // Analog Clock (Decorative)
             Container(
               width: 180,
@@ -3276,7 +3594,7 @@ class _CustomTimePickerDialogState extends State<_CustomTimePickerDialog> {
               ),
             ),
             const SizedBox(height: 40),
-            
+
             // Time Selectors
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -3302,7 +3620,7 @@ class _CustomTimePickerDialogState extends State<_CustomTimePickerDialog> {
               ],
             ),
             const SizedBox(height: 40),
-            
+
             // Set Time Button
             SizedBox(
               width: double.infinity,
@@ -3311,12 +3629,15 @@ class _CustomTimePickerDialogState extends State<_CustomTimePickerDialog> {
                 onPressed: () {
                   int finalHour = _hour % 12;
                   if (_period == 'PM') finalHour += 12;
-                  Navigator.pop(context, TimeOfDay(hour: finalHour, minute: _minute));
+                  Navigator.pop(
+                      context, TimeOfDay(hour: finalHour, minute: _minute));
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2D6A74), // Match screenshot's teal-ish color
+                  backgroundColor: const Color(
+                      0xFF2D6A74), // Match screenshot's teal-ish color
                   foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                   elevation: 0,
                 ),
                 child: Text(
@@ -3330,7 +3651,8 @@ class _CustomTimePickerDialogState extends State<_CustomTimePickerDialog> {
               onPressed: () => Navigator.pop(context),
               child: Text(
                 'Cancel',
-                style: GoogleFonts.poppins(color: textColor.withOpacity(0.5), fontSize: 12),
+                style: GoogleFonts.poppins(
+                    color: textColor.withOpacity(0.5), fontSize: 12),
               ),
             ),
           ],
@@ -3339,16 +3661,21 @@ class _CustomTimePickerDialogState extends State<_CustomTimePickerDialog> {
     );
   }
 
-  Widget _selector(List<String> items, String value, ValueChanged<String?> onChanged, bool isDark) {
+  Widget _selector(List<String> items, String value,
+      ValueChanged<String?> onChanged, bool isDark) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: isDark ? Colors.white.withOpacity(0.05) : Colors.grey.withOpacity(0.1),
+        color: isDark
+            ? Colors.white.withOpacity(0.05)
+            : Colors.grey.withOpacity(0.1),
         borderRadius: BorderRadius.circular(12),
       ),
       child: DropdownButton<String>(
         value: value,
-        items: items.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+        items: items
+            .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+            .toList(),
         onChanged: onChanged,
         underline: const SizedBox(),
         style: GoogleFonts.poppins(
@@ -3356,7 +3683,8 @@ class _CustomTimePickerDialogState extends State<_CustomTimePickerDialog> {
           fontSize: 16,
           fontWeight: FontWeight.w600,
         ),
-        icon: Icon(Icons.arrow_drop_down, color: isDark ? Colors.white38 : Colors.black38),
+        icon: Icon(Icons.arrow_drop_down,
+            color: isDark ? Colors.white38 : Colors.black38),
         dropdownColor: isDark ? const Color(0xFF2A244D) : Colors.white,
       ),
     );
@@ -3464,7 +3792,8 @@ class _InteractiveThermostatGauge extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                   decoration: BoxDecoration(
                     color: _getColorForTemp(actualTemp).withOpacity(0.15),
                     borderRadius: BorderRadius.circular(20),
@@ -3488,7 +3817,8 @@ class _InteractiveThermostatGauge extends StatelessWidget {
                       Text(
                         '${actualTemp.toStringAsFixed(1)}°C',
                         style: GoogleFonts.poppins(
-                          color: isDark ? Colors.white : const Color(0xFF1B172E),
+                          color:
+                              isDark ? Colors.white : const Color(0xFF1B172E),
                           fontSize: 14,
                           fontWeight: FontWeight.w800,
                         ),
@@ -3634,8 +3964,8 @@ class _InteractiveThermostatPainter extends CustomPainter {
         ..color = isActive
             ? activeColor
             : (isDark
-                  ? Colors.white.withOpacity(0.1)
-                  : Colors.black.withOpacity(0.1))
+                ? Colors.white.withOpacity(0.1)
+                : Colors.black.withOpacity(0.1))
         ..strokeWidth = 1.5;
       final innerR = radius - 45;
       final outerR = radius - 30;
@@ -3692,3 +4022,166 @@ class _InteractiveThermostatPainter extends CustomPainter {
   }
 }
 
+class _ScheduleControlDialog extends StatelessWidget {
+  final bool isDark;
+  final String initialOn;
+  final String initialOff;
+  final Function(String type, String time) onCommand;
+  final VoidCallback onClear;
+
+  const _ScheduleControlDialog({
+    required this.isDark,
+    required this.initialOn,
+    required this.initialOff,
+    required this.onCommand,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          width: MediaQuery.of(context).size.width * 0.85,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1B172E),
+            borderRadius: BorderRadius.circular(32),
+            border: Border.all(
+                color: const Color(0xFF6CC042).withOpacity(0.2), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.5),
+                blurRadius: 40,
+                offset: const Offset(0, 20),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6CC042).withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.calendar_today_rounded,
+                  color: Color(0xFF6CC042),
+                  size: 24,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text("Daily Schedule",
+                  style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800)),
+              Text("Manage your AC timing",
+                  style: GoogleFonts.poppins(
+                      color: Colors.white38,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500)),
+              const SizedBox(height: 32),
+              _buildTimeRow(context, "START TIME", initialOn, "SCH_ON"),
+              const SizedBox(height: 16),
+              _buildTimeRow(context, "END TIME", initialOff, "SCH_OFF"),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () {
+                    onClear();
+                    Navigator.pop(context);
+                  },
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.redAccent,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  child: const Text(
+                    "CLEAR ALL SCHEDULES",
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold, letterSpacing: 1),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text("CLOSE",
+                    style: GoogleFonts.poppins(
+                        color: Colors.white24,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimeRow(
+      BuildContext context, String label, String current, String type) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label,
+                style: GoogleFonts.poppins(
+                    color: Colors.white24,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold)),
+            Text(current,
+                style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold)),
+          ],
+        ),
+        ElevatedButton(
+          onPressed: () async {
+            final picked = await showTimePicker(
+              context: context,
+              initialTime: TimeOfDay.now(),
+              builder: (context, child) {
+                return Theme(
+                  data: isDark
+                      ? ThemeData.dark().copyWith(
+                          colorScheme: const ColorScheme.dark(
+                              primary: Color(0xFF6CC042),
+                              onPrimary: Colors.white,
+                              surface: Color(0xFF1B172E),
+                              onSurface: Colors.white),
+                        )
+                      : ThemeData.light().copyWith(
+                          colorScheme: const ColorScheme.light(
+                              primary: Color(0xFF6CC042))),
+                  child: child!,
+                );
+              },
+            );
+            if (picked != null) {
+              final formatted =
+                  "${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}";
+              onCommand(type, formatted);
+              Navigator.pop(context);
+            }
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF6CC042).withOpacity(0.1),
+            foregroundColor: const Color(0xFF6CC042),
+            elevation: 0,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          child: const Text("SET"),
+        ),
+      ],
+    );
+  }
+}

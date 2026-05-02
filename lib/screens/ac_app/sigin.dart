@@ -107,7 +107,8 @@ class _SignInPageState extends State<SignInPage> {
                 Text(
                   'Powering the Future of Energy',
                   style: GoogleFonts.poppins(
-                    color: (isDark ? Colors.white : colorScheme.primary).withValues(alpha: 0.6),
+                    color: (isDark ? Colors.white : colorScheme.primary)
+                        .withValues(alpha: 0.6),
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
                   ),
@@ -149,7 +150,9 @@ class _SignInPageState extends State<SignInPage> {
                       _obscurePassword
                           ? Icons.visibility_outlined
                           : Icons.visibility_off_outlined,
-                      color: isDark ? Colors.white38 : colorScheme.primary.withValues(alpha: 0.4),
+                      color: isDark
+                          ? Colors.white38
+                          : colorScheme.primary.withValues(alpha: 0.4),
                       size: 20,
                     ),
                     onPressed: () =>
@@ -180,7 +183,8 @@ class _SignInPageState extends State<SignInPage> {
                   child: Text(
                     'Forget Password ?',
                     style: GoogleFonts.poppins(
-                      color: (isDark ? Colors.white : colorScheme.primary).withValues(alpha: 0.7),
+                      color: (isDark ? Colors.white : colorScheme.primary)
+                          .withValues(alpha: 0.7),
                       fontSize: 13,
                     ),
                   ),
@@ -202,20 +206,23 @@ class _SignInPageState extends State<SignInPage> {
                         TextSpan(
                           text: 'Only the user who has the license of ',
                           style: TextStyle(
-                            color: (isDark ? Colors.white : colorScheme.primary).withValues(alpha: 0.55),
+                            color: (isDark ? Colors.white : colorScheme.primary)
+                                .withValues(alpha: 0.55),
                           ),
                         ),
                         TextSpan(
                           text: 'Sustainabyte Technology Pvt. Ltd.',
                           style: TextStyle(
-                            color: isDark ? AppColors.button : colorScheme.primary,
+                            color:
+                                isDark ? AppColors.button : colorScheme.primary,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                         TextSpan(
                           text: ' can access this dashboard',
                           style: TextStyle(
-                            color: (isDark ? Colors.white : colorScheme.primary).withValues(alpha: 0.55),
+                            color: (isDark ? Colors.white : colorScheme.primary)
+                                .withValues(alpha: 0.55),
                           ),
                         ),
                       ],
@@ -290,34 +297,39 @@ class _RoundedInput extends StatelessWidget {
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: GoogleFonts.poppins(
-          color: (isDark ? Colors.white : colorScheme.primary).withValues(alpha: 0.35),
+          color: (isDark ? Colors.white : colorScheme.primary)
+              .withValues(alpha: 0.35),
           fontSize: 14,
         ),
         prefixIcon: prefixIcon != null
-            ? Icon(
-                prefixIcon, 
-                color: (isDark ? Colors.white : colorScheme.primary).withValues(alpha: 0.4), 
-                size: 20
-              )
+            ? Icon(prefixIcon,
+                color: (isDark ? Colors.white : colorScheme.primary)
+                    .withValues(alpha: 0.4),
+                size: 20)
             : null,
         suffixIcon: suffixIcon,
         contentPadding:
             const EdgeInsets.symmetric(vertical: 18, horizontal: 18),
         filled: true,
-        fillColor: isDark 
-            ? AppColors.secondaryBackground 
+        fillColor: isDark
+            ? AppColors.secondaryBackground
             : colorScheme.primary.withValues(alpha: 0.05),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: isDark ? BorderSide.none : BorderSide(color: colorScheme.primary.withValues(alpha: 0.1)),
+          borderSide: isDark
+              ? BorderSide.none
+              : BorderSide(color: colorScheme.primary.withValues(alpha: 0.1)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: isDark ? BorderSide.none : BorderSide(color: colorScheme.primary.withValues(alpha: 0.1)),
+          borderSide: isDark
+              ? BorderSide.none
+              : BorderSide(color: colorScheme.primary.withValues(alpha: 0.1)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: isDark ? AppColors.button : colorScheme.primary, width: 1),
+          borderSide: BorderSide(
+              color: isDark ? AppColors.button : colorScheme.primary, width: 1),
         ),
       ),
     );

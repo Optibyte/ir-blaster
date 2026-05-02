@@ -24,7 +24,7 @@ _PivotResult _buildPivot(_PivotInput input) {
   final Map<String, Map<String, String>> pivot = {};
   final Map<String, DateTime> timeToLocal = {};
   final List<String> names = [];
-  
+
   try {
     final decoded = jsonDecode(input.rawJson);
     if (decoded is Map) {
@@ -36,35 +36,34 @@ _PivotResult _buildPivot(_PivotInput input) {
           names.add(colName);
         }
       }
-      
+
       // 2. Extract rows from data
       final dataArray = decoded['data'] as List<dynamic>? ?? [];
       for (final row in dataArray) {
         if (row is Map) {
           final timeStr = row['_time']?.toString() ?? '';
           if (timeStr.isEmpty) continue;
-          
+
           final localTime = DateTime.parse(timeStr).toLocal();
-          final timeKey =
-              '${localTime.day.toString().padLeft(2, '0')}-'
+          final timeKey = '${localTime.day.toString().padLeft(2, '0')}-'
               '${localTime.month.toString().padLeft(2, '0')} '
               '${localTime.hour.toString().padLeft(2, '0')}:'
               '${localTime.minute.toString().padLeft(2, '0')}';
-              
+
           pivot[timeKey] = {};
           timeToLocal[timeKey] = localTime;
-          
+
           for (final col in names) {
-             final val = row[col];
-             if (val != null) {
-               if (val is double) {
-                  pivot[timeKey]![col] = val.toStringAsFixed(2);
-               } else {
-                  pivot[timeKey]![col] = val.toString();
-               }
-             } else {
-               pivot[timeKey]![col] = '--';
-             }
+            final val = row[col];
+            if (val != null) {
+              if (val is double) {
+                pivot[timeKey]![col] = val.toStringAsFixed(2);
+              } else {
+                pivot[timeKey]![col] = val.toString();
+              }
+            } else {
+              pivot[timeKey]![col] = '--';
+            }
           }
         }
       }
@@ -165,14 +164,18 @@ class _TrendsTableState extends State<TrendsTable> {
       widget.dateRange.start.year,
       widget.dateRange.start.month,
       widget.dateRange.start.day,
-      0, 0, 0,
+      0,
+      0,
+      0,
     ).toUtc().toIso8601String();
 
     final endTime = DateTime(
       widget.dateRange.end.year,
       widget.dateRange.end.month,
       widget.dateRange.end.day,
-      23, 59, 59,
+      23,
+      59,
+      59,
     ).toUtc().toIso8601String();
 
     final url =
@@ -230,11 +233,19 @@ class _TrendsTableState extends State<TrendsTable> {
         }
       } else {
         debugPrint('❌ TABLE FAILED: ${response.statusCode} ${response.body}');
-        if (mounted) setState(() { _isLoading = false; _hasLoaded = true; });
+        if (mounted)
+          setState(() {
+            _isLoading = false;
+            _hasLoaded = true;
+          });
       }
     } catch (e, stack) {
       debugPrint('❌ TABLE ERROR: $e\n$stack');
-      if (mounted) setState(() { _isLoading = false; _hasLoaded = true; });
+      if (mounted)
+        setState(() {
+          _isLoading = false;
+          _hasLoaded = true;
+        });
     }
   }
 
@@ -331,7 +342,9 @@ class _TrendsTableState extends State<TrendsTable> {
                     Container(
                       height: 40,
                       decoration: BoxDecoration(
-                        color: isDark ? Colors.white.withOpacity(0.05) : Colors.grey.withOpacity(0.1),
+                        color: isDark
+                            ? Colors.white.withOpacity(0.05)
+                            : Colors.grey.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
@@ -343,7 +356,9 @@ class _TrendsTableState extends State<TrendsTable> {
                         margin: const EdgeInsets.only(bottom: 6),
                         height: 36,
                         decoration: BoxDecoration(
-                          color: isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.02),
+                          color: isDark
+                              ? Colors.white.withOpacity(0.02)
+                              : Colors.black.withOpacity(0.02),
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
@@ -357,12 +372,13 @@ class _TrendsTableState extends State<TrendsTable> {
                 child: Center(
                   child: Column(
                     children: [
-                      Icon(Icons.table_rows_outlined, size: 36, color: subColor),
+                      Icon(Icons.table_rows_outlined,
+                          size: 36, color: subColor),
                       const SizedBox(height: 8),
                       Text(
                         'No data for this period',
-                        style: GoogleFonts.poppins(
-                            color: subColor, fontSize: 12),
+                        style:
+                            GoogleFonts.poppins(color: subColor, fontSize: 12),
                       ),
                     ],
                   ),
@@ -410,10 +426,13 @@ class _TrendsTableState extends State<TrendsTable> {
                       Expanded(
                         child: ListView.builder(
                           physics: const BouncingScrollPhysics(),
-                          itemCount: (_sortedTimes.length - _currentPage * _rowsPerPage).clamp(0, _rowsPerPage),
+                          itemCount: (_sortedTimes.length -
+                                  _currentPage * _rowsPerPage)
+                              .clamp(0, _rowsPerPage),
                           itemExtent: 36,
                           itemBuilder: (context, index) {
-                            final actualIndex = (_currentPage * _rowsPerPage) + index;
+                            final actualIndex =
+                                (_currentPage * _rowsPerPage) + index;
                             final timeKey = _sortedTimes[actualIndex];
                             final rowData = _pivot[timeKey] ?? {};
                             final isEven = index % 2 == 0;

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:math' as math;
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:esp/core/services/auth_service.dart';
+import 'package:esp/core/config/app_config.dart';
 
-import 'package:esp/core/constants/colors.dart';
-import 'schedule_overview_page.dart';
+// Removed unused imports
 
 // DashboardScreen manages its own tabs — no HomePage rebuild on tab switch
 class DashboardScreen extends StatefulWidget {
@@ -15,6 +18,77 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   int _tabIndex = 0; // 0=Status, 1=Trends, 2=Schedule
+
+  bool _isLoading = true;
+  Map<String, dynamic>? _summary;
+  List<dynamic> _equipments = [];
+  Map<String, String> _systemsMap = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchSummaryData();
+  }
+
+  Future<void> _fetchSummaryData() async {
+    try {
+      final companyId = await AuthService.getCompanyId() ?? '';
+      final siteId = await AuthService.getSiteId() ?? '';
+      final zoneId = await AuthService.getZoneId() ?? '';
+      final token = await AuthService.getCookieHeader() ?? '';
+
+      final url =
+          '${AppConfig.provisionBaseUrl}/equipments/ac/by-company?companyId=$companyId&siteId=$siteId&zoneId=$zoneId';
+      debugPrint('🌐 [Dashboard] Fetching AC Summary: $url');
+
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body);
+        if (body['status'] == 1) {
+          // Also fetch systems to map systemId to Name
+          final systemsUrl = '${AppConfig.provisionBaseUrl}/systems?companyId=$companyId&siteId=$siteId';
+          final systemsResponse = await http.get(
+            Uri.parse(systemsUrl),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+          );
+          
+          Map<String, String> sMap = {};
+          if (systemsResponse.statusCode == 200) {
+            final sBody = jsonDecode(systemsResponse.body);
+            if (sBody['status'] == 1 && sBody['data'] != null) {
+              for (var s in sBody['data']) {
+                sMap[s['systemId']] = s['name'];
+              }
+            }
+          }
+
+          if (mounted) {
+            setState(() {
+              _summary = body['summary'];
+              _equipments = body['data'] ?? [];
+              _systemsMap = sMap;
+              _isLoading = false;
+            });
+          }
+        }
+      } else {
+        if (mounted) setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      debugPrint('❌ [Dashboard] Error: $e');
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -29,29 +103,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
           child: Row(
             children: [
-              _chip('Status', 0, isDark),
+              _chip('Dashboard', 0, isDark),
               const SizedBox(width: 10),
               _chip('Trends', 1, isDark),
-              const SizedBox(width: 10),
-              _chip('Schedule', 2, isDark),
             ],
           ),
         ),
-
-        // ── Metric Cards (Status tab only) ────────────────
-        if (_tabIndex == 0)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-            child: Row(
-              children: [
-                _metricCard('TOTAL AC', '45', const Color(0xFF0EA5E9), isDark),
-                const SizedBox(width: 12),
-                _metricCard('RUNNING', '38', const Color(0xFF6CC042), isDark),
-                const SizedBox(width: 12),
-                _metricCard('OFFLINE', '7', const Color(0xFFF59E0B), isDark),
-              ],
-            ),
-          ),
 
         // ── Tab Body ──────────────────────────────────────
         Expanded(
@@ -65,10 +122,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     switch (_tabIndex) {
       case 1:
         return _TrendsView(isDark: isDark, textColor: textColor);
-      case 2:
-        return const ScheduleOverviewContent();
       default:
-        return _StatusView(isDark: isDark, textColor: textColor);
+        return _isLoading 
+            ? const Center(child: CircularProgressIndicator(color: Color(0xFF6CC042)))
+            : _StatusView(
+                isDark: isDark, 
+                textColor: textColor,
+                summary: _summary ?? {},
+                equipments: _equipments,
+                systemsMap: _systemsMap,
+              );
     }
   }
 
@@ -82,17 +145,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
         decoration: BoxDecoration(
           color: isActive 
-              ? primary.withOpacity(isDark ? 0.2 : 0.1) 
-              : (isDark ? Colors.white.withOpacity(0.03) : Colors.black.withOpacity(0.02)),
+              ? primary.withValues(alpha: isDark ? 0.2 : 0.1) 
+              : (isDark ? Colors.white.withValues(alpha: 0.03) : Colors.black.withValues(alpha: 0.02)),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: isActive ? primary : (isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05)),
+            color: isActive ? primary : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.05)),
             width: 1.5,
           ),
           boxShadow: [
             if (isActive)
               BoxShadow(
-                color: primary.withOpacity(0.2),
+                color: primary.withValues(alpha: 0.2),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -112,67 +175,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _metricCard(String label, String value, Color color, bool isDark) {
-    final bg = isDark ? const Color(0xFF2D2D44) : Colors.white;
-    final tc = isDark ? Colors.white : const Color(0xFF1B172E);
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: (isDark ? Colors.white : Colors.black).withOpacity(0.05),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                label.contains('TOTAL') ? Icons.grid_view_rounded : 
-                label.contains('RUNNING') ? Icons.play_arrow_rounded : 
-                Icons.pause_rounded,
-                color: color,
-                size: 14,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              label,
-              style: GoogleFonts.poppins(
-                color: tc.withOpacity(0.4),
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: GoogleFonts.poppins(
-                color: tc,
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -181,76 +183,97 @@ class _DashboardScreenState extends State<DashboardScreen> {
 class _StatusView extends StatelessWidget {
   final bool isDark;
   final Color textColor;
-  const _StatusView({required this.isDark, required this.textColor});
+  final Map<String, dynamic> summary;
+  final List<dynamic> equipments;
+  final Map<String, String> systemsMap;
+
+  const _StatusView({
+    required this.isDark,
+    required this.textColor,
+    required this.summary,
+    required this.equipments,
+    required this.systemsMap,
+  });
+
+  Widget _smallMetricCard(String title, int value, Color color, IconData icon, Color cardColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+            child: Icon(icon, color: color, size: 16),
+          ),
+          const SizedBox(height: 10),
+          Text('$value', style: GoogleFonts.poppins(color: textColor, fontSize: 18, fontWeight: FontWeight.w800)),
+          Text(title, style: GoogleFonts.poppins(color: textColor.withValues(alpha: 0.5), fontSize: 9, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final cardColor = isDark ? const Color(0xFF2A244D) : Colors.white;
 
-    const segments = [
-      ChartSegment('Running', 38, Color(0xFF6CC042)),
-      ChartSegment('Offline', 7, Color(0xFF94A3B8)),
-      ChartSegment('Alert', 5, Color(0xFFF43F5E)),
+    final segments = [
+      ChartSegment('Running', (summary['on'] ?? 0).toDouble(), const Color(0xFF6CC042)),
+      ChartSegment('Offline', (summary['off'] ?? 0).toDouble(), const Color(0xFFEF4444)),
+      ChartSegment('Not Connected', (summary['notConnected'] ?? 0).toDouble(), const Color(0xFF94A3B8)),
     ];
+    
+    final int totalUnits = summary['total'] ?? 0;
+    final int notConnUnits = summary['notConnected'] ?? 0;
+    final int connectedUnits = totalUnits - notConnUnits;
+    final int runningUnits = summary['on'] ?? 0;
+    final String runningPercentage = totalUnits > 0 ? '${(runningUnits * 100 / totalUnits).round()}%' : '0%';
 
-    final floors = [
-      _FloorData('Floor 1', 10, 8, 1, 1),
-      _FloorData('Floor 2', 15, 12, 2, 1),
-      _FloorData('Floor 3', 20, 18, 4, 2),
-    ];
+    // Group by systemName
+    final Map<String, List<dynamic>> grouped = {};
+    for (var e in equipments) {
+      final sId = e['systemId'];
+      final sysName = (sId != null && systemsMap.containsKey(sId)) 
+          ? systemsMap[sId]! 
+          : (e['acType'] ?? 'General System'); 
+      grouped.putIfAbsent(sysName, () => []).add(e);
+    }
 
-    // All individual equipment entries for the popup
-    final allEquipment = [
-      _EquipData('AC-101', 'Floor 1', 'Running'),
-      _EquipData('AC-102', 'Floor 1', 'Running'),
-      _EquipData('AC-103', 'Floor 1', 'Running'),
-      _EquipData('AC-104', 'Floor 1', 'Running'),
-      _EquipData('AC-105', 'Floor 1', 'Running'),
-      _EquipData('AC-106', 'Floor 1', 'Running'),
-      _EquipData('AC-107', 'Floor 1', 'Running'),
-      _EquipData('AC-108', 'Floor 1', 'Running'),
-      _EquipData('AC-109', 'Floor 1', 'Alert'),
-      _EquipData('AC-110', 'Floor 1', 'Offline'),
-      _EquipData('AC-201', 'Floor 2', 'Running'),
-      _EquipData('AC-202', 'Floor 2', 'Running'),
-      _EquipData('AC-203', 'Floor 2', 'Running'),
-      _EquipData('AC-204', 'Floor 2', 'Running'),
-      _EquipData('AC-205', 'Floor 2', 'Running'),
-      _EquipData('AC-206', 'Floor 2', 'Running'),
-      _EquipData('AC-207', 'Floor 2', 'Running'),
-      _EquipData('AC-208', 'Floor 2', 'Running'),
-      _EquipData('AC-209', 'Floor 2', 'Running'),
-      _EquipData('AC-210', 'Floor 2', 'Running'),
-      _EquipData('AC-211', 'Floor 2', 'Running'),
-      _EquipData('AC-212', 'Floor 2', 'Running'),
-      _EquipData('AC-213', 'Floor 2', 'Alert'),
-      _EquipData('AC-214', 'Floor 2', 'Alert'),
-      _EquipData('AC-215', 'Floor 2', 'Offline'),
-      _EquipData('AC-301', 'Floor 3', 'Running'),
-      _EquipData('AC-302', 'Floor 3', 'Running'),
-      _EquipData('AC-303', 'Floor 3', 'Running'),
-      _EquipData('AC-304', 'Floor 3', 'Running'),
-      _EquipData('AC-305', 'Floor 3', 'Running'),
-      _EquipData('AC-306', 'Floor 3', 'Running'),
-      _EquipData('AC-307', 'Floor 3', 'Running'),
-      _EquipData('AC-308', 'Floor 3', 'Running'),
-      _EquipData('AC-309', 'Floor 3', 'Running'),
-      _EquipData('AC-310', 'Floor 3', 'Running'),
-      _EquipData('AC-311', 'Floor 3', 'Running'),
-      _EquipData('AC-312', 'Floor 3', 'Running'),
-      _EquipData('AC-313', 'Floor 3', 'Running'),
-      _EquipData('AC-314', 'Floor 3', 'Running'),
-      _EquipData('AC-315', 'Floor 3', 'Running'),
-      _EquipData('AC-316', 'Floor 3', 'Running'),
-      _EquipData('AC-317', 'Floor 3', 'Running'),
-      _EquipData('AC-318', 'Floor 3', 'Running'),
-      _EquipData('AC-319', 'Floor 3', 'Alert'),
-      _EquipData('AC-320', 'Floor 3', 'Alert'),
-      _EquipData('AC-321', 'Floor 3', 'Alert'),
-      _EquipData('AC-322', 'Floor 3', 'Alert'),
-      _EquipData('AC-323', 'Floor 3', 'Offline'),
-      _EquipData('AC-324', 'Floor 3', 'Offline'),
-    ];
+    final floors = grouped.entries.map((entry) {
+      final list = entry.value;
+      int running = 0, offline = 0, notConn = 0;
+      for (var item in list) {
+        final status = item['onOffStatus'];
+        if (status != null && status['isOnline'] == true) {
+          if (status['acStatus'] == 'ON') {
+            running++;
+          } else {
+            offline++;
+          }
+        } else {
+          notConn++;
+        }
+      }
+      return _FloorData(entry.key, list.length, running, 0, offline + notConn);
+    }).toList();
+
+    // Map to popup data
+    final allEquipment = equipments.map((e) {
+      final statusObj = e['onOffStatus'];
+      String status = 'Offline';
+      if (statusObj != null && statusObj['isOnline'] == true) {
+        status = statusObj['acStatus'] == 'ON' ? 'Running' : 'Offline';
+      }
+      return _EquipData(e['name'] ?? 'Unknown', e['systemId'] ?? '', status, e['acType'] ?? 'General AC');
+    }).toList();
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -258,6 +281,18 @@ class _StatusView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _header('Overview'),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: _smallMetricCard('Total AC', totalUnits, const Color(0xFF0EA5E9), Icons.grid_view_rounded, cardColor)),
+              const SizedBox(width: 10),
+              Expanded(child: _smallMetricCard('Connected', connectedUnits, const Color(0xFF8B5CF6), Icons.wifi_rounded, cardColor)),
+              const SizedBox(width: 10),
+              Expanded(child: _smallMetricCard('Disconnected', notConnUnits, const Color(0xFF94A3B8), Icons.wifi_off_rounded, cardColor)),
+            ],
+          ),
+          const SizedBox(height: 28),
           _header('AC Status Distribution'),
           const SizedBox(height: 12),
           // Doughnut Card
@@ -267,22 +302,22 @@ class _StatusView extends StatelessWidget {
             child: Row(
               children: [
                 SizedBox(
-                  width: 130, height: 130,
+                  width: 160, height: 160,
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
                       RepaintBoundary(
                         child: CustomPaint(
-                          size: const Size(130, 130),
+                          size: const Size(160, 160),
                           painter: DoughnutPainter(
                             segments: segments,
-                            bgColor: isDark ? AppColors.background.withValues(alpha: 0.5) : const Color(0xFFF3F4F6),
+                            bgColor: isDark ? textColor.withValues(alpha: 0.05) : const Color(0xFFF3F4F6),
+                            strokeWidth: 32,
                           ),
                         ),
                       ),
                       Column(mainAxisSize: MainAxisSize.min, children: [
-                        Text('45', style: GoogleFonts.poppins(color: textColor, fontSize: 32, fontWeight: FontWeight.w800)),
-                        Text('TOTAL UNITS', style: GoogleFonts.poppins(color: textColor.withOpacity(0.4), fontSize: 8, fontWeight: FontWeight.w700, letterSpacing: 1.0)),
+                        Text(runningPercentage, style: GoogleFonts.poppins(color: textColor, fontSize: 32, fontWeight: FontWeight.w600)),
                       ]),
                     ],
                   ),
@@ -305,7 +340,7 @@ class _StatusView extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 28),
-          _header('AC Status by Equipment'),
+          _header('AC Status by System'),
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(24),
@@ -313,9 +348,9 @@ class _StatusView extends StatelessWidget {
             child: Column(
               children: [
                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  Text('AC Status by Systems', style: GoogleFonts.poppins(color: textColor, fontSize: 15, fontWeight: FontWeight.w700)),
+                  Text('Status by System', style: GoogleFonts.poppins(color: textColor, fontSize: 15, fontWeight: FontWeight.w700)),
                   GestureDetector(
-                    onTap: () => _showEquipmentPopup(context, allEquipment, isDark),
+                    onTap: () => _showEquipmentPopup(context, allEquipment, isDark, systemsMap),
                     child: Text('View All', style: GoogleFonts.poppins(color: const Color(0xFF0EA5E9), fontSize: 13, fontWeight: FontWeight.w600)),
                   ),
                 ]),
@@ -339,7 +374,7 @@ class _StatusView extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(f.name, style: GoogleFonts.poppins(color: textColor, fontSize: 14, fontWeight: FontWeight.w700)),
-          Text('${f.total} Units', style: GoogleFonts.poppins(color: textColor.withOpacity(0.4), fontSize: 11, fontWeight: FontWeight.w600)),
+          Text('${f.total} Units', style: GoogleFonts.poppins(color: textColor.withValues(alpha: 0.4), fontSize: 11, fontWeight: FontWeight.w600)),
         ],
       ),
       const SizedBox(height: 12),
@@ -386,35 +421,184 @@ class _StatusView extends StatelessWidget {
 // ──────────────────────────────────────────────────────────────
 // TRENDS VIEW
 // ──────────────────────────────────────────────────────────────
-class _TrendsView extends StatelessWidget {
+class _TrendsView extends StatefulWidget {
   final bool isDark;
   final Color textColor;
   const _TrendsView({required this.isDark, required this.textColor});
 
   @override
+  State<_TrendsView> createState() => _TrendsViewState();
+}
+
+class _TrendsViewState extends State<_TrendsView> {
+  bool _isLoading = true;
+  List<double> _tempData = [];
+  List<String> _tempLabels = [];
+  String _currentTemp = '--°C';
+
+  List<double> _humData = [];
+  List<String> _humLabels = [];
+  String _currentHum = '--%';
+
+  DateTimeRange _selectedRange = DateTimeRange(
+    start: DateTime.now().subtract(const Duration(days: 0)),
+    end: DateTime.now(),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchTrendsData();
+  }
+
+  Future<void> _fetchTrendsData() async {
+    try {
+      final token = await AuthService.getCookieHeader() ?? '';
+      final companyId = await AuthService.getCompanyId() ?? '';
+      final siteId = await AuthService.getSiteId() ?? '';
+
+      // Fetch Live Equipment Data
+      final url = '${AppConfig.provisionBaseUrl}/equipments/ac/by-company?companyId=$companyId&siteId=$siteId';
+      debugPrint('🌐 [TrendsView] Fetching Live Data: $url');
+      
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      );
+
+      if (mounted) {
+        setState(() {
+          if (response.statusCode == 200) {
+            final body = jsonDecode(response.body);
+            if (body['status'] == 1 && body['data'] != null) {
+              final equipments = body['data'] as List<dynamic>;
+              
+              List<double> tempValues = [];
+              List<double> humValues = [];
+              List<String> labels = [];
+
+              for (var e in equipments) {
+                final status = e['onOffStatus'];
+                if (status != null && status['temperature'] != null && status['humidity'] != null) {
+                  tempValues.add((status['temperature'] as num).toDouble());
+                  humValues.add((status['humidity'] as num).toDouble());
+                  
+                  String name = e['name'] ?? 'Unknown';
+                  labels.add(name.length > 8 ? '${name.substring(0, 8)}...' : name);
+                }
+              }
+
+              if (tempValues.length > 1) {
+                _tempData = tempValues;
+                _humData = humValues;
+                _tempLabels = labels;
+                _humLabels = labels;
+
+                double avgTemp = tempValues.reduce((a, b) => a + b) / tempValues.length;
+                double avgHum = humValues.reduce((a, b) => a + b) / humValues.length;
+                
+                _currentTemp = '${avgTemp.toStringAsFixed(1)}°C';
+                _currentHum = '${avgHum.toStringAsFixed(1)}%';
+              } else {
+                _tempData = [0, 0];
+                _humData = [0, 0];
+                _tempLabels = ['No Data', 'No Data'];
+                _humLabels = ['No Data', 'No Data'];
+              }
+            }
+          }
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ [TrendsView] Error: $e');
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _pickDateRange() async {
+    final range = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2023),
+      lastDate: DateTime.now(),
+      initialDateRange: _selectedRange,
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: widget.isDark 
+            ? const ColorScheme.dark(primary: Colors.blueAccent, onPrimary: Colors.white, surface: Color(0xFF1E1E1E))
+            : const ColorScheme.light(primary: Colors.blue, onPrimary: Colors.white),
+        ),
+        child: child!,
+      ),
+    );
+
+    if (range != null) {
+      setState(() {
+        _selectedRange = range;
+        _isLoading = true;
+      });
+      _fetchTrendsData();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 100),
+        child: Center(child: CircularProgressIndicator(color: Color(0xFF6CC042))),
+      );
+    }
+
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('ENVIRONMENTAL TRENDS', style: GoogleFonts.poppins(color: textColor.withValues(alpha: 0.4), fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
-          const SizedBox(height: 12),
-          const LineChartCard(
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('ENVIRONMENTAL TRENDS', style: GoogleFonts.poppins(color: widget.textColor.withValues(alpha: 0.4), fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+              InkWell(
+                onTap: _pickDateRange,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: widget.isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: widget.isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.1)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.calendar_month, size: 16, color: widget.textColor),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${_selectedRange.start.day}/${_selectedRange.start.month} - ${_selectedRange.end.day}/${_selectedRange.end.month}',
+                        style: GoogleFonts.poppins(color: widget.textColor, fontSize: 11, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          LineChartCard(
             title: 'Average Temperature Trend (°C)',
-            color: Color(0xFF0EA5E9),
-            data: [27.5, 28.2, 27.8, 28.5, 27.9, 29.1, 30.2, 29.5, 31.2, 31.84, 31.5, 31.2, 30.8],
-            labels: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'],
-            currentValue: '31.84°C',
+            color: const Color(0xFF0EA5E9),
+            data: _tempData.length > 1 ? _tempData : [0, 0], // Needs at least 2 points to draw line
+            labels: _tempLabels.length > 1 ? [_tempLabels.first, _tempLabels.last] : ['00:00', '23:59'],
+            currentValue: _currentTemp,
           ),
           const SizedBox(height: 20),
-          const LineChartCard(
+          LineChartCard(
             title: 'Average Humidity Trend (%)',
-            color: Color(0xFF6CC042),
-            data: [35, 33, 30, 28, 32, 31, 34, 31, 33, 31.9, 36, 38, 37],
-            labels: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'],
-            currentValue: '31.90%',
+            color: const Color(0xFF6CC042),
+            data: _humData.length > 1 ? _humData : [0, 0],
+            labels: _humLabels.length > 1 ? [_humLabels.first, _humLabels.last] : ['00:00', '23:59'],
+            currentValue: _currentHum,
           ),
         ],
       ),
@@ -471,14 +655,7 @@ class _LineChartCardState extends State<LineChartCard> {
               const SizedBox(height: 2),
               Text(widget.currentValue, style: GoogleFonts.poppins(color: textColor, fontSize: 18, fontWeight: FontWeight.w800)),
             ])),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03), borderRadius: BorderRadius.circular(10)),
-              child: Row(children: [
-                Text('Today', style: GoogleFonts.poppins(color: textColor.withValues(alpha: 0.7), fontSize: 11, fontWeight: FontWeight.w600)),
-                Icon(Icons.keyboard_arrow_down_rounded, size: 15, color: textColor.withValues(alpha: 0.7)),
-              ]),
-            ),
+            const SizedBox.shrink(),
           ]),
           const SizedBox(height: 20),
           Expanded(
@@ -557,20 +734,24 @@ class _FloorData {
 
 class _EquipData {
   final String id;
-  final String floor;
+  final String systemId;
   final String status;
-  const _EquipData(this.id, this.floor, this.status);
+  final String acType;
+  const _EquipData(this.id, this.systemId, this.status, this.acType);
 }
 
-void _showEquipmentPopup(BuildContext context, List<_EquipData> equipment, bool isDark) {
+void _showEquipmentPopup(BuildContext context, List<_EquipData> equipment, bool isDark, Map<String, String> systemsMap) {
   final cardColor = isDark ? const Color(0xFF2A244D) : Colors.white;
   final bgColor = isDark ? const Color(0xFF1B172E) : const Color(0xFFF5F5F5);
   final textColor = isDark ? Colors.white : const Color(0xFF1B172E);
 
-  Color statusColor(String s) {
-    if (s == 'Running') return const Color(0xFF6CC042);
-    if (s == 'Alert') return const Color(0xFFF59E0B);
-    return const Color(0xFFEF4444);
+  Color sc(String s) => s == 'Running' ? const Color(0xFF6CC042) : const Color(0xFF94A3B8);
+
+  // Group by systemName
+  final Map<String, List<_EquipData>> grouped = {};
+  for (var e in equipment) {
+    final name = systemsMap.containsKey(e.systemId) ? systemsMap[e.systemId]! : e.acType;
+    grouped.putIfAbsent(name, () => []).add(e);
   }
 
   showModalBottomSheet(
@@ -578,17 +759,16 @@ void _showEquipmentPopup(BuildContext context, List<_EquipData> equipment, bool 
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (ctx) => DraggableScrollableSheet(
-      initialChildSize: 0.75,
-      minChildSize: 0.4,
+      initialChildSize: 0.85,
+      minChildSize: 0.5,
       maxChildSize: 0.95,
       builder: (_, scrollController) => Container(
         decoration: BoxDecoration(
           color: bgColor,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
         ),
         child: Column(
           children: [
-            // Handle bar
             Container(
               margin: const EdgeInsets.only(top: 12),
               width: 40, height: 4,
@@ -598,84 +778,84 @@ void _showEquipmentPopup(BuildContext context, List<_EquipData> equipment, bool 
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('All Equipments',
-                      style: GoogleFonts.poppins(color: textColor, fontSize: 18, fontWeight: FontWeight.w800)),
-                  Text('${equipment.length} units',
-                      style: GoogleFonts.poppins(color: textColor.withValues(alpha: 0.4), fontSize: 13, fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ),
-            // Legend
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-              child: Row(
-                children: [
-                  _legendDot(const Color(0xFF6CC042), 'Running', textColor),
-                  const SizedBox(width: 16),
-                  _legendDot(const Color(0xFFF59E0B), 'Alert', textColor),
-                  const SizedBox(width: 16),
-                  _legendDot(const Color(0xFFEF4444), 'Offline', textColor),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            // List
-            Expanded(
-              child: ListView.separated(
-                controller: scrollController,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                itemCount: equipment.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (_, i) {
-                  final e = equipment[i];
-                  final sc = statusColor(e.status);
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  Text('All Equipment',
+                      style: GoogleFonts.poppins(color: textColor, fontSize: 20, fontWeight: FontWeight.w800)),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                      color: cardColor,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: sc.withValues(alpha: 0.15)),
+                      color: const Color(0xFF6CC042).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Row(
+                    child: Text('${equipment.length} units',
+                        style: GoogleFonts.poppins(color: const Color(0xFF6CC042), fontSize: 12, fontWeight: FontWeight.w700)),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, indent: 24, endIndent: 24),
+            Expanded(
+              child: ListView.builder(
+                controller: scrollController,
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
+                itemCount: grouped.length,
+                itemBuilder: (context, index) {
+                  final groupName = grouped.keys.elementAt(index);
+                  final units = grouped[groupName]!;
+                  final running = units.where((u) => u.status == 'Running').length;
+                  final offline = units.length - running;
+                  final total = units.length;
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(20)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 40, height: 40,
-                          decoration: BoxDecoration(
-                            color: sc.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(Icons.ac_unit_rounded, color: sc, size: 20),
+                        // System header
+                        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                          Expanded(child: Text(groupName,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.poppins(color: textColor, fontSize: 14, fontWeight: FontWeight.w700))),
+                          Text('$running/$total Online',
+                              style: GoogleFonts.poppins(color: textColor.withValues(alpha: 0.4), fontSize: 11, fontWeight: FontWeight.w600)),
+                        ]),
+                        const SizedBox(height: 12),
+                        // Progress bar
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: SizedBox(height: 6, child: Row(children: [
+                            if (running > 0) Flexible(flex: (running * 100 / total).round(), child: Container(color: const Color(0xFF6CC042))),
+                            if (offline > 0) Flexible(flex: (offline * 100 / total).round(), child: Container(color: const Color(0xFF94A3B8))),
+                          ])),
                         ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(e.id, style: GoogleFonts.poppins(color: textColor, fontSize: 14, fontWeight: FontWeight.w700)),
-                              Text(e.floor, style: GoogleFonts.poppins(color: textColor.withValues(alpha: 0.4), fontSize: 11, fontWeight: FontWeight.w500)),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: sc.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: sc.withValues(alpha: 0.3)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(width: 6, height: 6, decoration: BoxDecoration(color: sc, shape: BoxShape.circle)),
-                              const SizedBox(width: 6),
-                              Text(e.status, style: GoogleFonts.poppins(color: sc, fontSize: 11, fontWeight: FontWeight.w700)),
-                            ],
-                          ),
-                        ),
+                        const SizedBox(height: 14),
+                        // Individual equipment list
+                        ...units.map((e) {
+                          final color = sc(e.status);
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 8, height: 8,
+                                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(e.id,
+                                      style: GoogleFonts.poppins(color: textColor, fontSize: 13, fontWeight: FontWeight.w500)),
+                                ),
+                                Text(e.status,
+                                    style: GoogleFonts.poppins(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
+                              ],
+                            ),
+                          );
+                        }),
                       ],
                     ),
                   );
@@ -689,15 +869,6 @@ void _showEquipmentPopup(BuildContext context, List<_EquipData> equipment, bool 
   );
 }
 
-Widget _legendDot(Color color, String label, Color textColor) => Row(
-  mainAxisSize: MainAxisSize.min,
-  children: [
-    Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-    const SizedBox(width: 6),
-    Text(label, style: GoogleFonts.poppins(color: textColor.withValues(alpha: 0.6), fontSize: 11, fontWeight: FontWeight.w600)),
-  ],
-);
-
 class DoughnutPainter extends CustomPainter {
   final List<ChartSegment> segments;
   final Color bgColor;
@@ -709,15 +880,14 @@ class DoughnutPainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = math.min(size.width, size.height) / 2 - strokeWidth / 2;
     final rect = Rect.fromCircle(center: center, radius: radius);
-    canvas.drawCircle(center, radius, Paint()..color = bgColor..style = PaintingStyle.stroke..strokeWidth = strokeWidth..strokeCap = StrokeCap.round);
+    canvas.drawCircle(center, radius, Paint()..color = bgColor..style = PaintingStyle.stroke..strokeWidth = strokeWidth..strokeCap = StrokeCap.butt);
     double total = segments.fold(0, (s, e) => s + e.value);
     if (total == 0) return;
     double angle = -math.pi / 2;
-    const gap = 0.06;
     for (final seg in segments) {
-      final sweep = (seg.value / total) * 2 * math.pi - gap;
-      if (sweep > 0) canvas.drawArc(rect, angle + gap / 2, sweep, false, Paint()..color = seg.color..style = PaintingStyle.stroke..strokeWidth = strokeWidth..strokeCap = StrokeCap.round);
-      angle += sweep + gap;
+      final sweep = (seg.value / total) * 2 * math.pi;
+      if (sweep > 0) canvas.drawArc(rect, angle, sweep, false, Paint()..color = seg.color..style = PaintingStyle.stroke..strokeWidth = strokeWidth..strokeCap = StrokeCap.butt);
+      angle += sweep;
     }
   }
 

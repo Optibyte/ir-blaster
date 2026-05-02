@@ -15,23 +15,28 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  int _currentIndex = 1; // Start on Dashboard (index 1 since 0 is Back)
+  int _currentIndex = 1; // Start on Dashboard (index 1)
+  late final PageController _pageController;
   int _systemCount = 0;
+
   @override
   void initState() {
     super.initState();
+    _pageController = PageController(initialPage: _currentIndex - 1);
   }
 
   @override
   void dispose() {
+    _pageController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF1B172E) : const Color(0xFFF8FAFC),
       body: Column(
         children: [
           // Top Navbar
@@ -40,7 +45,9 @@ class _HomePageState extends State<HomePage> {
             child: TopNavbar(
               showIcons: true,
               hideBranding: _currentIndex == 2, // Only hide branding for Systems
-              title: _currentIndex == 2 ? 'SYSTEMS VIEW' : 'VIEWS',
+              title: _currentIndex == 2
+                  ? 'SYSTEMS VIEW'
+                  : (_currentIndex == 1 ? 'DASHBOARD' : 'VIEWS'),
               // subtitle: 'HVAC MONITORING',
               totalCount: _currentIndex == 2 ? '$_systemCount' : null,
             ),
@@ -48,12 +55,17 @@ class _HomePageState extends State<HomePage> {
 
           // Body
           Expanded(
-            child: IndexedStack(
-              index: _currentIndex - 1, // Offset by 1 because 0 is Back
+            child: PageView(
+              controller: _pageController,
+              physics: const BouncingScrollPhysics(),
+              onPageChanged: (index) {
+                setState(() => _currentIndex = index + 1);
+              },
               children: [
                 const DashboardScreen(),
                 SystemViewPage(
-                  onCountChanged: (count) => setState(() => _systemCount = count),
+                  onCountChanged: (count) =>
+                      setState(() => _systemCount = count),
                   onViewPressed: (systemId, systemName, systemShortId) {
                     Navigator.push(
                       context,
@@ -67,7 +79,6 @@ class _HomePageState extends State<HomePage> {
                     );
                   },
                 ),
-                _buildLogs(),
               ],
             ),
           ),
@@ -90,7 +101,11 @@ class _HomePageState extends State<HomePage> {
             if (index == 0) {
               widget.onBack?.call();
             } else {
-              setState(() => _currentIndex = index);
+              _pageController.animateToPage(
+                index - 1,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+              );
             }
           },
           backgroundColor: Colors.transparent,
@@ -113,25 +128,17 @@ class _HomePageState extends State<HomePage> {
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.dashboard_outlined),
-              activeIcon: Icon(Icons.dashboard_rounded),
               label: 'Dashboard',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.layers_outlined),
-              activeIcon: Icon(Icons.layers_rounded),
               label: 'Systems',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.history_rounded),
-              activeIcon: Icon(Icons.history_rounded),
-              label: 'Logs',
             ),
           ],
         ),
       ),
     );
   }
-
 
   Widget _buildLogs() {
     final isDark = Theme.of(context).brightness == Brightness.dark;

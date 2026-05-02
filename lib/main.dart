@@ -11,10 +11,11 @@ import 'package:esp/core/constants/colors.dart';
 import 'package:esp/core/services/auth_service.dart' as ac_auth;
 import 'package:esp/screens/ac_app/sigin.dart';
 import 'package:esp/screens/main_navigation_page.dart';
+import 'package:esp/screens/ac_app/splash_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Initialize Firebase
   try {
     await Firebase.initializeApp(
@@ -45,7 +46,7 @@ class MainApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-    
+
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Optibyte - IR Blaster',
@@ -79,11 +80,7 @@ class _AuthGateState extends State<_AuthGate> {
       future: _authFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(color: Color(0xFF6CC042)),
-            ),
-          );
+          return const ACSplashScreen();
         }
 
         if (snapshot.hasError) {
@@ -96,7 +93,8 @@ class _AuthGateState extends State<_AuthGate> {
                   const SizedBox(height: 16),
                   Text(
                     'Connection Error',
-                    style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600),
+                    style: GoogleFonts.poppins(
+                        fontSize: 18, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
                   const Text(
@@ -110,8 +108,10 @@ class _AuthGateState extends State<_AuthGate> {
                         _authFuture = _checkAuth();
                       });
                     },
-                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.button),
-                    child: Text('Retry', style: GoogleFonts.poppins(color: Colors.white)),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.button),
+                    child: Text('Retry',
+                        style: GoogleFonts.poppins(color: Colors.white)),
                   ),
                 ],
               ),
@@ -131,17 +131,24 @@ class _AuthGateState extends State<_AuthGate> {
   }
 
   Future<Map<String, dynamic>?> _checkAuth() async {
+    final startTime = DateTime.now();
+
+    Map<String, dynamic>? result;
     final cachedUser = await ac_auth.AuthService.getUserData();
     if (cachedUser != null) {
       // ignore: unawaited_futures
-      ac_auth.AuthService.verify(); 
-      return cachedUser;
+      ac_auth.AuthService.verify();
+      result = cachedUser;
+    } else if (await ac_auth.AuthService.hasStoredSession()) {
+      result = await ac_auth.AuthService.verify();
     }
 
-    if (await ac_auth.AuthService.hasStoredSession()) {
-      return ac_auth.AuthService.verify();
+    // Ensure splash screen is visible for at least 2.5 seconds
+    final elapsed = DateTime.now().difference(startTime).inMilliseconds;
+    if (elapsed < 2500) {
+      await Future.delayed(Duration(milliseconds: 2500 - elapsed));
     }
 
-    return null;
+    return result;
   }
 }

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:esp/screens/mode_selection_page.dart';
-import 'package:esp/screens/ac_app/home.dart';
-import 'package:esp/core/constants/colors.dart';
+import 'package:esp/screens/ac_app/dashboard_screen.dart';
+import 'package:esp/screens/ac_app/system_view.dart';
+import 'package:esp/screens/ac_app/device_detail_page.dart';
+import 'package:esp/widgets/top_navbar.dart';
 
 class MainNavigationPage extends StatefulWidget {
   const MainNavigationPage({super.key});
@@ -13,30 +15,76 @@ class MainNavigationPage extends StatefulWidget {
 
 class _MainNavigationPageState extends State<MainNavigationPage> {
   int _currentIndex = 0;
-
-  late final List<Widget> _pages;
+  late final PageController _pageController;
+  int _systemCount = 0;
 
   @override
   void initState() {
     super.initState();
-    _pages = [
-      const ModeSelectionPage(),
-      HomePage(
-        onBack: () => setState(() => _currentIndex = 0),
-      ),
-    ];
+    _pageController = PageController(initialPage: 0);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _pages,
+      backgroundColor: isDark ? const Color(0xFF1B172E) : const Color(0xFFF8FAFC),
+      body: Column(
+        children: [
+          // Top Navbar (Only show for AC App tabs)
+          if (_currentIndex > 0)
+            SafeArea(
+              bottom: false,
+              child: TopNavbar(
+                showIcons: true,
+                hideBranding: _currentIndex == 2,
+                title: _currentIndex == 1 ? 'DASHBOARD' : 'SYSTEMS VIEW',
+                totalCount: _currentIndex == 2 ? '$_systemCount' : null,
+              ),
+            ),
+
+          Expanded(
+            child: PageView(
+              controller: _pageController,
+              onPageChanged: (index) => setState(() => _currentIndex = index),
+              children: [
+                const ModeSelectionPage(),
+                const DashboardScreen(),
+                SystemViewPage(
+                  onCountChanged: (count) => setState(() => _systemCount = count),
+                  onViewPressed: (systemId, systemName, systemShortId) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => DeviceDetailPage(
+                          deviceName: systemName,
+                          systemId: systemId,
+                          systemShortId: systemShortId,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
-      bottomNavigationBar: _currentIndex == 0 ? Container(
+      bottomNavigationBar: _buildBottomBar(isDark),
+    );
+  }
+
+  Widget _buildBottomBar(bool isDark) {
+    if (_currentIndex == 0) {
+      // Mode Selection Navbar
+      return Container(
         decoration: BoxDecoration(
           boxShadow: [
             BoxShadow(
@@ -47,29 +95,82 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           ],
         ),
         child: BottomNavigationBar(
-          currentIndex: _currentIndex,
-          onTap: (index) => setState(() => _currentIndex = index),
+          currentIndex: 0,
+          onTap: (index) {
+            if (index == 1) {
+              _pageController.animateToPage(1,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut);
+            }
+          },
           backgroundColor: isDark ? const Color(0xFF1A1A2E) : Colors.white,
           selectedItemColor: const Color(0xFF6CC042),
           unselectedItemColor: isDark ? Colors.white54 : Colors.black45,
           selectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 12),
-          unselectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w500, fontSize: 12),
           type: BottomNavigationBarType.fixed,
-          elevation: 0,
           items: const [
             BottomNavigationBarItem(
-              icon: Icon(Icons.settings_remote_outlined),
-              activeIcon: Icon(Icons.settings_remote),
+              icon: Icon(Icons.settings_remote),
               label: 'Mode Selection',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.grid_view_outlined),
-              activeIcon: Icon(Icons.grid_view_rounded),
               label: 'Views',
             ),
           ],
         ),
-      ) : null,
-    );
+      );
+    } else {
+      // AC App Navbar
+      return Container(
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 20,
+              offset: const Offset(0, -5),
+            ),
+          ],
+        ),
+        child: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          onTap: (index) {
+            if (index == 0) {
+              _pageController.animateToPage(0,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut);
+            } else {
+              _pageController.animateToPage(index,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut);
+            }
+          },
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          selectedItemColor: const Color(0xFF6CC042),
+          unselectedItemColor: isDark ? Colors.white38 : Colors.black38,
+          type: BottomNavigationBarType.fixed,
+          selectedLabelStyle: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w700),
+          unselectedLabelStyle: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w600),
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.arrow_back_ios_new_rounded),
+              label: 'Back',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.dashboard_outlined),
+              activeIcon: Icon(Icons.dashboard_rounded),
+              label: 'Dashboard',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.layers_outlined),
+              activeIcon: Icon(Icons.layers_rounded),
+              label: 'Systems',
+            ),
+          ],
+        ),
+      );
+    }
   }
 }

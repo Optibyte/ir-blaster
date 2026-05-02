@@ -6,7 +6,6 @@ class AppConfig {
   AppConfig._(); // prevent instantiation
 
   /// Base URL for the authentication service.
-  /// e.g. https://irac.sustainabyte.ai/authservice/v1
   static String get authBaseUrl =>
       dotenv.env['AUTH_BASE_URL'] ??
       (throw Exception('AUTH_BASE_URL not set in .env'));
@@ -14,4 +13,9 @@ class AppConfig {
   // ── Derived endpoints ───────────────────────────────────────────────
   static String get loginEndpoint  => '$authBaseUrl/login';
   static String get verifyEndpoint => '$authBaseUrl/verify';
+
+  /// Base URL for the ProvisionService backend (equipment, systems, etc.)
+  static String get provisionBaseUrl =>
+      dotenv.env['PROVISION_BASE_URL'] ??
+      (throw Exception('PROVISION_BASE_URL not set in .env'));
 }

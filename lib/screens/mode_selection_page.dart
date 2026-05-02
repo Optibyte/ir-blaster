@@ -440,35 +440,6 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
         centerTitle: true,
         backgroundColor: const Color(0xFF1A1A2E),
         elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.person_outline, color: Colors.white70),
-            onPressed: () {
-              showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: const Color(0xFF1A1A2E),
-                shape: const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                ),
-                builder: (context) => DraggableScrollableSheet(
-                  initialChildSize: 0.7,
-                  minChildSize: 0.5,
-                  maxChildSize: 0.95,
-                  expand: false,
-                  builder: (context, scrollController) => SingleChildScrollView(
-                    controller: scrollController,
-                    child: _buildProfileContent(),
-                  ),
-                ),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.redAccent),
-            onPressed: _handleLogout,
-          ),
-        ],
       ),
       body: _buildHomeContent(),
     );

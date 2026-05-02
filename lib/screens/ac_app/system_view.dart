@@ -7,7 +7,8 @@ import 'package:esp/core/services/auth_service.dart';
 
 /// System View page showing list of AC monitoring systems
 class SystemViewPage extends StatefulWidget {
-  final void Function(String systemId, String systemName, String systemShortId)? onViewPressed;
+  final void Function(String systemId, String systemName, String systemShortId)?
+      onViewPressed;
   final void Function(int count)? onCountChanged;
 
   const SystemViewPage({super.key, this.onViewPressed, this.onCountChanged});
@@ -58,31 +59,29 @@ class _SystemViewPageState extends State<SystemViewPage> {
         final List<dynamic> data = responseData['data'] as List<dynamic>;
 
         // Filter and map the data (Looking for items where systemType name is "AC Monitoring System")
-        final filteredSystems = data
-            .where((item) {
-              final systemType = item['systemType'] as Map<String, dynamic>?;
-              final typeName =
-                  (systemType?['name'] as String?)?.toLowerCase() ?? '';
-              return typeName.contains('ac monitoring');
-            })
-            .map((item) {
-              final name = item['name'] as String? ?? 'Unknown System';
-              final id = item['systemId'] as String? ?? 'No ID';
-              final shortId = item['shortId'] as String? ?? name; // Fallback to name
-              final systemType = item['systemType'] as Map<String, dynamic>?;
-              final typeName = systemType?['name'] as String? ?? 'AC System';
+        final filteredSystems = data.where((item) {
+          final systemType = item['systemType'] as Map<String, dynamic>?;
+          final typeName =
+              (systemType?['name'] as String?)?.toLowerCase() ?? '';
+          return typeName.contains('ac monitoring');
+        }).map((item) {
+          final name = item['name'] as String? ?? 'Unknown System';
+          final id = item['systemId'] as String? ?? 'No ID';
+          final shortId =
+              item['shortId'] as String? ?? name; // Fallback to name
+          final systemType = item['systemType'] as Map<String, dynamic>?;
+          final typeName = systemType?['name'] as String? ?? 'AC System';
 
-              return SystemItem(
-                title: name.toUpperCase(),
-                originalName: name,
-                equipment:
-                    typeName, // Showing the system type name (e.g. "AC Monitoring System")
-                systemId: id,
-                systemShortId: shortId,
-                iconColor: const Color(0xFF3B82F6),
-              );
-            })
-            .toList();
+          return SystemItem(
+            title: name.toUpperCase(),
+            originalName: name,
+            equipment:
+                typeName, // Showing the system type name (e.g. "AC Monitoring System")
+            systemId: id,
+            systemShortId: shortId,
+            iconColor: const Color(0xFF6CC042),
+          );
+        }).toList();
 
         debugPrint(
           '✅ [SystemView] Filtered ${filteredSystems.length} AC Monitoring systems',
@@ -156,7 +155,8 @@ class _SystemViewPageState extends State<SystemViewPage> {
                       padding: const EdgeInsets.only(bottom: 12),
                       child: _SystemCard(
                         system: systems[index],
-                        onViewPressed: (String id, String name, String shortId) {
+                        onViewPressed:
+                            (String id, String name, String shortId) {
                           // 1. Fetch equipment details for this system
                           _fetchEquipments(id);
 
@@ -195,7 +195,8 @@ class SystemItem {
 
 class _SystemCard extends StatelessWidget {
   final SystemItem system;
-  final void Function(String systemId, String systemName, String systemShortId) onViewPressed;
+  final void Function(String systemId, String systemName, String systemShortId)
+      onViewPressed;
 
   const _SystemCard({required this.system, required this.onViewPressed});
 
@@ -204,108 +205,96 @@ class _SystemCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        gradient: isDark
-            ? LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                colors: [
-                  const Color(0xFF4A90E2).withValues(alpha: 0.4),
-                  const Color(0xFF1E3A8A).withValues(alpha: 0.6),
-                ],
-              )
-            : LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                colors: [
-                  colorScheme.primary.withValues(alpha: 0.05),
-                  colorScheme.primary.withValues(alpha: 0.1),
-                ],
+    return GestureDetector(
+      onTap: () {
+        debugPrint(
+          '[SystemView] Tapped systemId: ${system.systemId}, shortId: ${system.systemShortId}, name: ${system.originalName}',
+        );
+        onViewPressed(
+            system.systemId, system.originalName, system.systemShortId);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF26213A) : Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withOpacity(0.06)
+                : const Color(0xFFE2E8F0),
+            width: 1,
+          ),
+          boxShadow: [
+            if (!isDark)
+              BoxShadow(
+                color: const Color(0xFF0F172A).withOpacity(0.05),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
               ),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.1)
-              : colorScheme.primary.withValues(alpha: 0.1),
-          width: 1,
+          ],
         ),
-        boxShadow: [
-          if (!isDark)
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-        ],
-      ),
-      child: Row(
-        children: [
-          // Icon
-          Container(
-            width: 50,
-            height: 50,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: system.iconColor.withValues(alpha: 0.1),
-            ),
-            child: Center(
-              child: Icon(Icons.ac_unit, color: system.iconColor, size: 24),
-            ),
-          ),
-          const SizedBox(width: 12),
-          // Content
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  system.title,
-                  style: GoogleFonts.poppins(
-                    color: isDark ? Colors.white : colorScheme.primary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  system.equipment,
-                  style: GoogleFonts.poppins(
-                    color: (isDark ? Colors.white : colorScheme.primary)
-                        .withValues(alpha: 0.5),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // View Button
-          GestureDetector(
-            onTap: () {
-              debugPrint(
-                '[SystemView] Tapped systemId: ${system.systemId}, shortId: ${system.systemShortId}, name: ${system.originalName}',
-              );
-              onViewPressed(system.systemId, system.originalName, system.systemShortId);
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
+          children: [
+            // Professional Icon Container
+            Container(
+              width: 52,
+              height: 52,
               decoration: BoxDecoration(
-                color: isDark ? AppColors.button : colorScheme.primary,
-                borderRadius: BorderRadius.circular(6),
+                color: isDark 
+                    ? system.iconColor.withOpacity(0.08)
+                    : system.iconColor.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(16),
+                border: !isDark ? Border.all(color: system.iconColor.withOpacity(0.1)) : null,
               ),
-              child: Text(
-                'View',
-                style: GoogleFonts.poppins(
-                  color: isDark ? Colors.black : Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
+              child: Icon(
+                Icons.apartment_rounded,
+                color: system.iconColor,
+                size: 26,
               ),
             ),
-          ),
-        ],
+            const SizedBox(width: 16),
+            // Content
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    system.title,
+                    style: GoogleFonts.poppins(
+                      color: isDark ? Colors.white : const Color(0xFF1B172E),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    system.equipment,
+                    style: GoogleFonts.poppins(
+                      color: (isDark ? Colors.white : Colors.black)
+                          .withOpacity(0.3),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Right Side Navigation Icon
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.white.withOpacity(0.03) : Colors.black.withOpacity(0.02),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.chevron_right_rounded,
+                color: isDark ? Colors.white24 : Colors.black26,
+                size: 20,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

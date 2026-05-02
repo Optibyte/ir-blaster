@@ -71,8 +71,17 @@ class TopNavbar extends StatelessWidget {
                   ),
                   const SizedBox(width: 14),
                 ],
+                if (hideBranding) ...[
+                  // Systems View Icon
+                  Icon(
+                    Icons.layers_rounded,
+                    color: const Color(0xFF6CC042),
+                    size: 28,
+                  ),
+                  const SizedBox(width: 12),
+                ],
                 Column(
-                  crossAxisAlignment: hideBranding ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+                  crossAxisAlignment: hideBranding ? CrossAxisAlignment.start : CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (!hideBranding)
@@ -90,10 +99,10 @@ class TopNavbar extends StatelessWidget {
                         title!,
                         style: GoogleFonts.poppins(
                           color: hideBranding 
-                              ? (isDark ? Colors.white : const Color(0xFF1B172E))
+                              ? (isDark ? const Color.fromARGB(255, 232, 221, 221) : const Color(0xFF1B172E))
                               : const Color(0xFF6CC042),
                           fontSize: hideBranding ? 20 : 10,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w900,
                           letterSpacing: 1.0,
                         ),
                       ),
@@ -114,21 +123,186 @@ class TopNavbar extends StatelessWidget {
 
           const Spacer(),
 
-          // Actions Section
-          if (showIcons && !hideBranding)
+          // Actions & Count Section
+          if (hideBranding && totalCount != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF6CC042).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: const Color(0xFF6CC042).withOpacity(0.2),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Text(
+                    'TOTAL: ',
+                    style: GoogleFonts.poppins(
+                      color: isDark ? Colors.white38 : Colors.black38,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    totalCount!,
+                    style: GoogleFonts.poppins(
+                      color: const Color(0xFF6CC042),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else if (showIcons && !hideBranding)
             Row(
               children: [
-                // Theme Toggle with subtle background
                 _ActionButton(
-                  icon: themeProvider.isDarkMode
-                      ? Icons.light_mode_outlined
-                      : Icons.dark_mode_outlined,
-                  onPressed: () => themeProvider.toggleTheme(),
+                  icon: Icons.settings_outlined,
+                  onPressed: () => _showProfilePopup(context),
                   isDark: isDark,
                 ),
               ],
             ),
         ],
+      ),
+    );
+  }
+
+  void _showProfilePopup(BuildContext context) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    final userData = await AuthService.getUserData();
+    final email = await AuthService.getEmail();
+
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.2),
+      builder: (context) => Stack(
+        children: [
+          Positioned(
+            top: 60,
+            right: 20,
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                width: 260,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1B172E) : Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: (isDark ? Colors.white : Colors.black).withOpacity(0.08),
+                    width: 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Profile Header (Small)
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 20,
+                          backgroundColor: const Color(0xFF6CC042).withOpacity(0.1),
+                          child: const Icon(Icons.person_rounded, color: Color(0xFF6CC042), size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                userData?['name'] ?? 'User',
+                                style: GoogleFonts.poppins(
+                                  color: isDark ? Colors.white : const Color(0xFF1B172E),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              Text(
+                                email ?? '',
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.poppins(
+                                  color: (isDark ? Colors.white : const Color(0xFF1B172E)).withOpacity(0.5),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    const Divider(height: 1),
+                    const SizedBox(height: 16),
+
+                    const SizedBox(height: 8),
+
+                    // Logout Item
+                    _menuItem(
+                      icon: Icons.logout_rounded,
+                      label: 'Logout',
+                      isDark: isDark,
+                      color: const Color(0xFFEF4444),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _showLogoutDialog(context);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _menuItem({
+    required IconData icon,
+    required String label,
+    required bool isDark,
+    required VoidCallback onTap,
+    Widget? trailing,
+    Color? color,
+  }) {
+    final baseColor = color ?? (isDark ? Colors.white : const Color(0xFF1B172E));
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Row(
+          children: [
+            Icon(icon, color: baseColor.withOpacity(0.7), size: 18),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                style: GoogleFonts.poppins(
+                  color: baseColor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            if (trailing != null) trailing,
+          ],
+        ),
       ),
     );
   }

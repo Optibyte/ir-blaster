@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:esp/core/constants/colors.dart';
+import 'package:ir_blaster_ac/core/constants/colors.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:esp/core/services/auth_service.dart';
+import 'package:ir_blaster_ac/core/services/auth_service.dart';
+import 'package:ir_blaster_ac/core/config/app_config.dart';
 
 /// System View page showing list of AC monitoring systems
 class SystemViewPage extends StatefulWidget {
@@ -36,7 +37,7 @@ class _SystemViewPageState extends State<SystemViewPage> {
 
     // 2. Construct the API URL
     final apiUrl =
-        'https://optibyte.sustainabyte.ai/provisionservice/v1/systems'
+        '${AppConfig.provisionBaseUrl}/systems'
         '?companyId=$companyId&siteId=$siteId&bucket=$bucket';
 
     debugPrint('🌐 [SystemView] Fetching from API: $apiUrl');
@@ -111,7 +112,7 @@ class _SystemViewPageState extends State<SystemViewPage> {
     final token = await AuthService.getCookieHeader() ?? '';
 
     final url =
-        'https://optibyte.sustainabyte.ai/provisionservice/v1/systems/equipment/$systemId'
+        '${AppConfig.provisionBaseUrl}/systems/equipment/$systemId'
         '?companyId=$companyId&siteId=$siteId&bucket=$bucket';
 
     debugPrint('🌐 [SystemView] Fetching Equipments: $url');
@@ -240,11 +241,13 @@ class _SystemCard extends StatelessWidget {
               width: 52,
               height: 52,
               decoration: BoxDecoration(
-                color: isDark 
+                color: isDark
                     ? system.iconColor.withOpacity(0.08)
                     : system.iconColor.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(16),
-                border: !isDark ? Border.all(color: system.iconColor.withOpacity(0.1)) : null,
+                border: !isDark
+                    ? Border.all(color: system.iconColor.withOpacity(0.1))
+                    : null,
               ),
               child: Icon(
                 Icons.apartment_rounded,
@@ -284,7 +287,9 @@ class _SystemCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: isDark ? Colors.white.withOpacity(0.03) : Colors.black.withOpacity(0.02),
+                color: isDark
+                    ? Colors.white.withOpacity(0.03)
+                    : Colors.black.withOpacity(0.02),
                 shape: BoxShape.circle,
               ),
               child: Icon(

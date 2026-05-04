@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:esp/core/services/api_service.dart';
-import 'package:esp/widgets/skeleton.dart';
+import 'package:ir_blaster_ac/core/services/api_service.dart';
+import 'package:ir_blaster_ac/widgets/skeleton.dart';
 
 import 'dart:math' as math;
 

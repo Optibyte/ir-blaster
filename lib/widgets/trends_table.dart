@@ -4,7 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
-import 'package:esp/core/services/auth_service.dart';
+import 'package:ir_blaster_ac/core/services/auth_service.dart';
+import 'package:ir_blaster_ac/core/config/app_config.dart';
 
 // ─── Isolate-safe data class (no Flutter objects) ────────────────────────────
 class _PivotInput {
@@ -178,8 +179,7 @@ class _TrendsTableState extends State<TrendsTable> {
       59,
     ).toUtc().toIso8601String();
 
-    final url =
-        'https://optibyte.sustainabyte.ai/provisionservice/v1/systems/query'
+    final url = '${AppConfig.provisionBaseUrl}/systems/query'
         '?page=1&pageSize=1000'
         '&companyId=${widget.companyId}'
         '&siteId=${widget.siteId}'

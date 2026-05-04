@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'bluetooth_scanner_page.dart';
-import 'package:esp/core/services/auth_service.dart';
-import 'package:esp/screens/ac_app/sigin.dart';
+import 'package:ir_blaster_ac/core/services/auth_service.dart';
+import 'package:ir_blaster_ac/screens/ac_app/sigin.dart';
 
 class ModeSelectionPage extends StatefulWidget {
   const ModeSelectionPage({super.key});
@@ -174,7 +174,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
                       ),
                       SizedBox(height: 4),
                       Text(
-                        "IR Blaster",
+                        "Optibyte IR",
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.white,
@@ -354,7 +354,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
           ),
           const SizedBox(height: 4),
           const Text(
-            "IoT / Embedded AC IR Blaster",
+            "Optibyte Smart AC Control",
             style: TextStyle(
               fontSize: 12,
               color: Colors.white70,
@@ -365,7 +365,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
           ListTile(
             leading: const Icon(Icons.info_outline, color: Colors.white70),
             title: const Text("App Version", style: TextStyle(color: Colors.white)),
-            subtitle: const Text("OptiByte IR Blaster v1.0.0", style: TextStyle(color: Colors.white70)),
+            subtitle: const Text("Optibyte IR Control v1.0.0", style: TextStyle(color: Colors.white70)),
             onTap: () {},
           ),
           const Divider(height: 1, color: Colors.white24),

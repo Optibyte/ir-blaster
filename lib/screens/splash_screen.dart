@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:esp/screens/ac_app/sigin.dart';
+import 'package:ir_blaster_ac/screens/ac_app/sigin.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -10,7 +10,7 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen> {
   static const Color _background = Color(0xFF1A1A2E);
-  static const Color _themeGreen = Color.fromARGB(255, 123, 159, 71);
+  static const Color _themeGreen = Color(0xFF6CC042);
 
   @override
   void initState() {
@@ -46,7 +46,7 @@ class _SplashScreenState extends State<SplashScreen> {
             ),
             const SizedBox(height: 30),
             const Text(
-              'IR BLASTER',
+              'OPTIBYTE',
               style: TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,

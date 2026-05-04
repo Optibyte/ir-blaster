@@ -10,7 +10,7 @@ class AppConfig {
       dotenv.env['AUTH_BASE_URL'] ??
       (throw Exception('AUTH_BASE_URL not set in .env'));
 
-  // ── Derived endpoints ───────────────────────────────────────────────
+  // ── Derived auth endpoints ────────────────────────────────────────────
   static String get loginEndpoint  => '$authBaseUrl/login';
   static String get verifyEndpoint => '$authBaseUrl/verify';
 
@@ -18,4 +18,24 @@ class AppConfig {
   static String get provisionBaseUrl =>
       dotenv.env['PROVISION_BASE_URL'] ??
       (throw Exception('PROVISION_BASE_URL not set in .env'));
+
+  // ── MQTT (IR Blaster) ────────────────────────────────────────────────
+  static String get mqttBroker =>
+      dotenv.env['MQTT_BROKER'] ?? '13.66.130.236';
+
+  static int get mqttPort =>
+      int.tryParse(dotenv.env['MQTT_PORT'] ?? '1883') ?? 1883;
+
+  static String get mqttTopic =>
+      dotenv.env['MQTT_TOPIC'] ?? 'testir';
+
+  static String get mqttUsername =>
+      dotenv.env['MQTT_USERNAME'] ?? 'testir';
+
+  static String get mqttPassword =>
+      dotenv.env['MQTT_PASSWORD'] ?? 'ir@123';
+
+  /// Prefix used in MQTT payloads, e.g. "sustainabyte_testir:STATUS_OFFLINE"
+  static String get mqttPayloadPrefix =>
+      dotenv.env['MQTT_PAYLOAD_PREFIX'] ?? 'sustainabyte_testir';
 }

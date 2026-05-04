@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:esp/core/constants/colors.dart';
+import 'package:ir_blaster_ac/core/constants/colors.dart';
 
 class ScheduleOverviewPage extends StatelessWidget {
   const ScheduleOverviewPage({Key? key}) : super(key: key);

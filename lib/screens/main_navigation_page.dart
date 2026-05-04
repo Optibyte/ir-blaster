@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:esp/screens/mode_selection_page.dart';
-import 'package:esp/screens/ac_app/dashboard_screen.dart';
-import 'package:esp/screens/ac_app/system_view.dart';
-import 'package:esp/screens/ac_app/device_detail_page.dart';
-import 'package:esp/widgets/top_navbar.dart';
+import 'package:ir_blaster_ac/screens/mode_selection_page.dart';
+import 'package:ir_blaster_ac/screens/ac_app/dashboard_screen.dart';
+import 'package:ir_blaster_ac/screens/ac_app/system_view.dart';
+import 'package:ir_blaster_ac/screens/ac_app/device_detail_page.dart';
+import 'package:ir_blaster_ac/widgets/top_navbar.dart';
 
 class MainNavigationPage extends StatefulWidget {
   const MainNavigationPage({super.key});

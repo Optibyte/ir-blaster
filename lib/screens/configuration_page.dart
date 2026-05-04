@@ -1337,7 +1337,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
               onShowSaveRemoteDialog: _showSaveRemoteDialog,
               canSaveRemote: _cfgStatus.contains("All keys captured"),
             )),
-            RepaintBoundary(child: _buildTerminal()),
+            // RepaintBoundary(child: _buildTerminal()), // Hidden as requested
             const SizedBox(height: 16),
           ],
         ),

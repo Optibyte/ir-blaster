@@ -45,18 +45,18 @@ flutter:
   assets:
     - assets/icon/
     - assets/images/
-    - assets/.env
+    - .env
 
 flutter_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/images/logo.png"
+  image_path: "assets/images/logo_padded.png"
   min_sdk_android: 21
-  adaptive_icon_background: "#6CC042"
-  adaptive_icon_foreground: "assets/images/logo.png"
+  adaptive_icon_background: "#060912"
+  adaptive_icon_foreground: "assets/images/logo_padded.png"
   web:
     generate: true
-    image_path: "assets/images/logo.png"
+    image_path: "assets/images/logo_padded.png"
     background_color: "#FFFFFF"
     theme_color: "#6CC042"
   windows:

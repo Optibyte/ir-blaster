@@ -85,9 +85,9 @@ class _ACSplashScreenState extends State<ACSplashScreen>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo with sophisticated animation
-                ElasticIn(
-                  duration: const Duration(milliseconds: 2000),
+                // Logo with sophisticated, smooth animation (ZoomIn is lag-free)
+                ZoomIn(
+                  duration: const Duration(milliseconds: 1500),
                   child: ScaleTransition(
                     scale: _pulseAnimation,
                     child: Hero(
@@ -106,7 +106,7 @@ class _ACSplashScreenState extends State<ACSplashScreen>
                         ),
                         child: Image.asset(
                           'assets/images/logo.png',
-                          width: 180,
+                          width: 120, // Reduced from 180 to fit completely
                           errorBuilder: (context, error, stackTrace) {
                             return const SizedBox
                                 .shrink(); // Remove the generic icon
@@ -118,24 +118,18 @@ class _ACSplashScreenState extends State<ACSplashScreen>
                 ),
                 const SizedBox(height: 40),
 
-                // Branding with individual character-like feel (using tracking animation)
+                // Branding text with smooth fade up (no layout thrashing)
                 FadeInUp(
                   duration: const Duration(milliseconds: 1000),
                   delay: const Duration(milliseconds: 800),
-                  child: TweenAnimationBuilder<double>(
-                    tween: Tween(begin: 12.0, end: 8.0),
-                    duration: const Duration(milliseconds: 1500),
-                    builder: (context, value, child) {
-                      return Text(
-                        'OPTIBYTE',
-                        style: GoogleFonts.inter(
-                          color: Colors.white,
-                          fontSize: 34,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: value,
-                        ),
-                      );
-                    },
+                  child: Text(
+                    'IR BLASTER AC',
+                    style: GoogleFonts.inter(
+                      color: Colors.white,
+                      fontSize: 28, // Slightly reduced to fit longer name
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 8.0, // Fixed letter spacing prevents layout lag
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),

@@ -27,7 +27,7 @@ Future<void> main() async {
 
   // Initialize Dotenv
   try {
-    await dotenv.load(fileName: "assets/.env");
+    await dotenv.load(fileName: ".env");
   } catch (e) {
     debugPrint('⚠️ Error loading .env: $e');
   }

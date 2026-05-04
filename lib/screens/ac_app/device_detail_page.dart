@@ -82,8 +82,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     )..repeat(reverse: true);
 
     _selectedEquipmentName = widget.deviceName;
-    // We no longer need to fetch equipments here if MQTT is already setup
-    // _fetchEquipments();
+    _fetchEquipments();
 
     // Seed initial data for chart
     for (int i = 0; i < 10; i++) {
@@ -97,11 +96,47 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
     _setupPersistentMqtt();
     _loadCachedStatus();
+    _loadCachedEquipments();
     
     // Telemetry is no longer "loading" once we have the persistent connection active
     if (mounted) {
       setState(() => _isTelemetryLoading = false);
     }
+  }
+
+  Future<void> _loadCachedEquipments() async {
+    final cached = await LocalCacheService.getEquipmentList(widget.systemId);
+    if (cached != null && mounted) {
+      _applyEquipmentData(cached);
+    }
+  }
+
+  void _applyEquipmentData(List<dynamic> equipmentList) {
+    if (!mounted) return;
+    setState(() {
+      try {
+        _equipmentsData = equipmentList.map((e) => Map<String, dynamic>.from(e)).toList();
+        _equipments = _equipmentsData
+            .map((e) => e['name']?.toString() ?? 'Unknown')
+            .toList();
+        _isLoadingEquipments = false;
+
+        if (_equipmentsData.isNotEmpty) {
+          final initialIndex = _equipmentsData.indexWhere(
+            (e) => e['name'] == widget.deviceName,
+          );
+          final targetIndex = initialIndex != -1 ? initialIndex : 0;
+          final Map<String, dynamic> eData = _equipmentsData[targetIndex];
+          
+          _selectedEquipmentId = eData['equipmentId']?.toString() ?? '';
+          _selectedEquipmentName = eData['name']?.toString() ?? '';
+          _selectedEquipmentTypeId = eData['equipmentTypeId']?.toString() ?? '';
+          _selectedEquipmentShortId = (eData['shortId'] ?? eData['equipmentShortId'])?.toString() ?? '';
+        }
+      } catch (e) {
+        debugPrint('⚠️ Error mapping equipment data: $e');
+      }
+    });
   }
 
   Future<void> _loadCachedStatus() async {
@@ -110,7 +145,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       final status = cached['status'];
       setState(() {
         if (status['temp'] != null) _actualTemperature = (status['temp'] as num).toDouble();
-        if (status['hum'] != null) _humidity = status['hum'] as int;
+        if (status['hum'] != null) _humidity = (status['hum'] as num).toInt();
         if (status['power'] != null) _isPowerOn = status['power'] as bool;
         if (status['online'] != null) _isOnline = status['online'] as bool;
       });
@@ -154,33 +189,15 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final List<dynamic> equipmentList = data['data'];
-
-        if (mounted) {
-          setState(() {
-            _equipmentsData = List<Map<String, dynamic>>.from(equipmentList);
-            _equipments = _equipmentsData
-                .map((e) => e['name'] as String? ?? 'Unknown')
-                .toList();
-            _isLoadingEquipments = false;
-
-            // Auto-select first equipment if not already selected or if current selection is dummy
-            if (_equipmentsData.isNotEmpty) {
-              final initialIndex = _equipmentsData.indexWhere(
-                (e) => e['name'] == widget.deviceName,
-              );
-              final targetIndex = initialIndex != -1 ? initialIndex : 0;
-
-              final eData = _equipmentsData[targetIndex];
-              _onEquipmentSelected(
-                eData['equipmentId']?.toString() ?? '',
-                eData['name']?.toString() ?? '',
-                eData['equipmentTypeId']?.toString() ?? '',
-                (eData['shortId'] ?? eData['equipmentShortId'])?.toString() ??
-                    '',
-              );
-            }
-          });
+        final dynamic listData = data['data'];
+        
+        if (listData != null && listData is List && mounted) {
+          final List<dynamic> equipmentList = listData;
+          _applyEquipmentData(equipmentList);
+          // Save to cache
+          LocalCacheService.saveEquipmentList(widget.systemId, equipmentList);
+        } else if (mounted) {
+          setState(() => _isLoadingEquipments = false);
         }
       }
     } catch (e) {
@@ -235,6 +252,10 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   }
 
   Future<void> _togglePower(bool value) async {
+    if (!_isOnline) {
+      _showOfflineWarning();
+      return;
+    }
     debugPrint('🔔 [ACTION] POWER TOGGLE: IMEI=$_deviceId, NewValue=$value');
     final companyId = await AuthService.getCompanyId() ?? '';
     final token = await AuthService.getCookieHeader() ?? '';
@@ -319,7 +340,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         debugPrint('✅ MQTT [DYNAMIC]: Connected');
 
         final String status = value ? "STATUS_ON" : "STATUS_OFF";
-        final String payload = ':$status';
+        final String payload = '${AppConfig.mqttPayloadPrefix}:$status';
 
         final builder = MqttClientPayloadBuilder();
         builder.addString(payload);
@@ -371,7 +392,15 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
 
 
+  bool _isConnectingMqtt = false;
+
   Future<void> _setupPersistentMqtt() async {
+    if (_isConnectingMqtt) return;
+    if (_persistentMqttClient?.connectionStatus?.state == MqttConnectionState.connected) {
+      return;
+    }
+    _isConnectingMqtt = true;
+
     final String broker = AppConfig.mqttBroker;
     final String topic = AppConfig.mqttTopic;
     final String username = AppConfig.mqttUsername;
@@ -407,6 +436,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         });
       }
     } catch (e) {
+      _isConnectingMqtt = false;
       debugPrint('❌ [MQTT Live] Error: $e');
       // Retry after 5 seconds
       Future.delayed(const Duration(seconds: 5), () => _setupPersistentMqtt());
@@ -486,6 +516,10 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   }
 
   Future<void> _publishMqttCommand(String message) async {
+    if (!_isOnline) {
+      _showOfflineWarning();
+      return;
+    }
     final String broker = AppConfig.mqttBroker;
     final String topic = AppConfig.mqttTopic;
     final String username = AppConfig.mqttUsername;
@@ -1449,13 +1483,22 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _controlButton(
-            icon: Icons.power_settings_new_rounded,
-            label: 'POWER',
-            isActive: _isPowerOn,
-            activeColor: const Color(0xFFEF4444),
-            onTap: () => _togglePower(!_isPowerOn),
-            isDark: isDark,
+          Opacity(
+            opacity: _isOnline ? 1.0 : 0.4,
+            child: _controlButton(
+              icon: Icons.power_settings_new_rounded,
+              label: 'POWER',
+              isActive: _isPowerOn,
+              activeColor: const Color(0xFFEF4444),
+              onTap: () {
+                if (_isOnline) {
+                  _togglePower(!_isPowerOn);
+                } else {
+                  _showOfflineWarning();
+                }
+              },
+              isDark: isDark,
+            ),
           ),
           _controlButton(
             icon: Icons.ac_unit_rounded,
@@ -1608,30 +1651,39 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               // ON Button
               Column(
                 children: [
-                  GestureDetector(
-                    onTap: () => _publishMqttCommand('${AppConfig.mqttPayloadPrefix}:STATUS_ON'),
-                    child: Container(
-                      width: 58,
-                      height: 58,
-                      decoration: BoxDecoration(
-                        color: _isPowerOn ? const Color(0xFF6CC042) : (isDark ? Colors.white10 : Colors.black12),
-                        shape: BoxShape.circle,
-                        boxShadow: _isPowerOn ? [
-                          BoxShadow(
-                            color: const Color(0xFF6CC042).withOpacity(0.4),
-                            blurRadius: 15,
-                            spreadRadius: 1,
+                  Opacity(
+                    opacity: _isOnline ? 1.0 : 0.4,
+                    child: GestureDetector(
+                      onTap: () {
+                        if (_isOnline) {
+                          _publishMqttCommand('${AppConfig.mqttPayloadPrefix}:STATUS_ON');
+                        } else {
+                          _showOfflineWarning();
+                        }
+                      },
+                      child: Container(
+                        width: 58,
+                        height: 58,
+                        decoration: BoxDecoration(
+                          color: _isPowerOn ? const Color(0xFF6CC042) : (isDark ? Colors.white10 : Colors.black12),
+                          shape: BoxShape.circle,
+                          boxShadow: _isPowerOn ? [
+                            BoxShadow(
+                              color: const Color(0xFF6CC042).withOpacity(0.4),
+                              blurRadius: 15,
+                              spreadRadius: 1,
+                            ),
+                          ] : null,
+                          border: Border.all(
+                            color: _isPowerOn ? Colors.white.withOpacity(0.2) : Colors.transparent,
+                            width: 2,
                           ),
-                        ] : null,
-                        border: Border.all(
-                          color: _isPowerOn ? Colors.white.withOpacity(0.2) : Colors.transparent,
-                          width: 2,
                         ),
-                      ),
-                      child: Icon(
-                        Icons.power_settings_new_rounded,
-                        color: _isPowerOn ? Colors.white : (isDark ? Colors.white38 : Colors.black38),
-                        size: 28,
+                        child: Icon(
+                          Icons.power_settings_new_rounded,
+                          color: _isPowerOn ? Colors.white : (isDark ? Colors.white38 : Colors.black38),
+                          size: 28,
+                        ),
                       ),
                     ),
                   ),
@@ -1651,30 +1703,39 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               // OFF Button
               Column(
                 children: [
-                  GestureDetector(
-                    onTap: () => _publishMqttCommand('${AppConfig.mqttPayloadPrefix}:STATUS_OFF'),
-                    child: Container(
-                      width: 58,
-                      height: 58,
-                      decoration: BoxDecoration(
-                        color: !_isPowerOn ? const Color(0xFFEF4444) : (isDark ? Colors.white10 : Colors.black12),
-                        shape: BoxShape.circle,
-                        boxShadow: !_isPowerOn ? [
-                          BoxShadow(
-                            color: const Color(0xFFEF4444).withOpacity(0.4),
-                            blurRadius: 15,
-                            spreadRadius: 1,
+                  Opacity(
+                    opacity: _isOnline ? 1.0 : 0.4,
+                    child: GestureDetector(
+                      onTap: () {
+                        if (_isOnline) {
+                          _publishMqttCommand('${AppConfig.mqttPayloadPrefix}:STATUS_OFF');
+                        } else {
+                          _showOfflineWarning();
+                        }
+                      },
+                      child: Container(
+                        width: 58,
+                        height: 58,
+                        decoration: BoxDecoration(
+                          color: !_isPowerOn ? const Color(0xFFEF4444) : (isDark ? Colors.white10 : Colors.black12),
+                          shape: BoxShape.circle,
+                          boxShadow: !_isPowerOn ? [
+                            BoxShadow(
+                              color: const Color(0xFFEF4444).withOpacity(0.4),
+                              blurRadius: 15,
+                              spreadRadius: 1,
+                            ),
+                          ] : null,
+                          border: Border.all(
+                            color: !_isPowerOn ? Colors.white.withOpacity(0.2) : Colors.transparent,
+                            width: 2,
                           ),
-                        ] : null,
-                        border: Border.all(
-                          color: !_isPowerOn ? Colors.white.withOpacity(0.2) : Colors.transparent,
-                          width: 2,
                         ),
-                      ),
-                      child: Icon(
-                        Icons.power_off_rounded,
-                        color: !_isPowerOn ? Colors.white : (isDark ? Colors.white38 : Colors.black38),
-                        size: 28,
+                        child: Icon(
+                          Icons.power_off_rounded,
+                          color: !_isPowerOn ? Colors.white : (isDark ? Colors.white38 : Colors.black38),
+                          size: 28,
+                        ),
                       ),
                     ),
                   ),
@@ -1694,32 +1755,39 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               // Schedule Control
               Column(
                 children: [
-                  GestureDetector(
-                    onTap: () {
-                      _showSchedulePicker(isDark);
-                    },
-                    child: Container(
-                      width: 58,
-                      height: 58,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF8B5CF6),
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF8B5CF6).withOpacity(0.4),
-                            blurRadius: 15,
-                            spreadRadius: 1,
+                  Opacity(
+                    opacity: _isOnline ? 1.0 : 0.4,
+                    child: GestureDetector(
+                      onTap: () {
+                        if (_isOnline) {
+                          _showSchedulePicker(isDark);
+                        } else {
+                          _showOfflineWarning();
+                        }
+                      },
+                      child: Container(
+                        width: 58,
+                        height: 58,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF8B5CF6),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF8B5CF6).withOpacity(0.4),
+                              blurRadius: 15,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.2),
+                            width: 2,
                           ),
-                        ],
-                        border: Border.all(
-                          color: Colors.white.withOpacity(0.2),
-                          width: 2,
                         ),
-                      ),
-                      child: const Icon(
-                        Icons.calendar_month_rounded,
-                        color: Colors.white,
-                        size: 28,
+                        child: const Icon(
+                          Icons.calendar_month_rounded,
+                          color: Colors.white,
+                          size: 28,
+                        ),
                       ),
                     ),
                   ),
@@ -2618,6 +2686,29 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         );
       }
     }
+  }
+
+  void _showOfflineWarning() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.wifi_off_rounded, color: Colors.white),
+            const SizedBox(width: 12),
+            Text(
+              'Device is Offline',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
   }
 }
 

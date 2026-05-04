@@ -77,12 +77,27 @@ class WifiSectionWidget extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    wifiStatus,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      color: isWifiConnected ? Colors.green : Colors.red,
-                    ),
+                  Row(
+                    children: [
+                      Text(
+                        wifiStatus,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: isWifiConnected 
+                              ? Colors.green 
+                              : (wifiStatus.contains('...') || wifiStatus.contains('⏳') ? Colors.orange : Colors.red),
+                        ),
+                      ),
+                      if (wifiStatus.contains('...') || wifiStatus.contains('⏳'))
+                        const Padding(
+                          padding: EdgeInsets.only(left: 8),
+                          child: SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange),
+                          ),
+                        ),
+                    ],
                   ),
                   if (wifiIP.isNotEmpty) Text(wifiIP, style: const TextStyle(fontSize: 12, color: Colors.white70)),
                   const SizedBox(height: 8),
@@ -187,7 +202,7 @@ class WifiSectionWidget extends StatelessWidget {
             Row(
               children: [
                 const Expanded(child: Text('Auto Control', style: TextStyle(fontWeight: FontWeight.w900, color: Colors.white))),
-                Switch(value: autoControlEnabled, onChanged: onAutoControlChanged, activeColor: themeGreen),
+                Switch(value: autoControlEnabled, onChanged: onAutoControlChanged, activeTrackColor: themeGreen),
               ],
             ),
             const SizedBox(height: 8),

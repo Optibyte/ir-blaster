@@ -59,4 +59,32 @@ class LocalCacheService {
     }
     return null;
   }
+
+  /// Save equipment list for a specific system
+  static Future<void> saveEquipmentList(String systemId, List<dynamic> data) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('equip_list_$systemId', jsonEncode({
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'data': data,
+      }));
+    } catch (e) {
+      debugPrint('⚠️ [Cache] Error saving equip list: $e');
+    }
+  }
+
+  /// Retrieve equipment list for a specific system
+  static Future<List<dynamic>?> getEquipmentList(String systemId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? cached = prefs.getString('equip_list_$systemId');
+      if (cached != null) {
+        final decoded = jsonDecode(cached);
+        return decoded['data'] as List<dynamic>;
+      }
+    } catch (e) {
+      debugPrint('⚠️ [Cache] Error reading equip list: $e');
+    }
+    return null;
+  }
 }

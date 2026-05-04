@@ -180,11 +180,20 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     _listenBluetooth();
     _startBluetoothStateMonitor();
     
-    // Automatically request temperature and time on startup
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted && _connection.isConnected) {
         _sendCommand("GET_TEMP");
         _sendCommand("GET_TIME");
+        _sendCommand("GET_WIFI"); // Ask device for actual WiFi status
+        
+        // Timeout for initial sync
+        Future.delayed(const Duration(seconds: 5), () {
+          if (mounted && _wifiStatus.contains("Syncing")) {
+            setState(() {
+              _wifiStatus = "WiFi not connected"; // Fallback if no response
+            });
+          }
+        });
       }
     });
   }
@@ -219,9 +228,16 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       final prefs = await SharedPreferences.getInstance();
 
       setState(() {
-        _isWifiConnected = prefs.getBool('wifi_connected') ?? false;
+        final wasConnected = prefs.getBool('wifi_connected') ?? false;
         _wifiIP = prefs.getString('wifi_ip') ?? "";
-        _wifiStatus = _isWifiConnected ? "WiFi connected: $_wifiIP" : "WiFi not connected";
+        
+        // We start as 'not connected' until the device confirms status
+        _isWifiConnected = false; 
+        if (wasConnected) {
+          _wifiStatus = "Syncing WiFi status... ⏳";
+        } else {
+          _wifiStatus = "WiFi not connected";
+        }
 
         _defaultRemoteBrand = prefs.getString('default_remote_brand') ?? "Samsung";
         _configBrand = prefs.getString('config_remote_brand') ?? "LG";
@@ -249,7 +265,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     } catch (_) {}
   }
 
-  Future<void> _saveWifiStatus(bool connected, {required String ip}) async {
+  Future<void> _saveWifiStatus(bool connected, {String ip = ""}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('wifi_connected', connected);
@@ -395,6 +411,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       final ip = line.replaceFirst("WIFI_CONNECTED:", "").trim();
       setState(() {
         _isWifiConnected = true;
+        _isConnectingWifi = false;
         _wifiIP = ip;
         _wifiStatus = "WiFi connected: $ip";
         _isGreenLedOn = true;
@@ -407,24 +424,75 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       _sendMqttSettingsToDevice(connect: true);
       return;
     }
-    if (line.startsWith("WIFI_FAILED")) {
+    if (line.toLowerCase().contains("wifi_failed") || line.toLowerCase().contains("wifi failed")) {
+      _hideWifiLoadingDialog();
       setState(() {
         _isWifiConnected = false;
+        _isConnectingWifi = false;
         _wifiIP = "";
-        _wifiStatus = "WiFi connection failed";
+        _wifiStatus = "WiFi connection failed ❌";
         _isGreenLedOn = false;
 
         _isMqttConnected = false;
         _mqttStatus = "MQTT not connected";
       });
       _saveWifiStatus(false, ip: "");
-      _hideWifiLoadingDialog();
       _showSnack("WiFi connection failed ❌", _red);
       return;
     }
 
+    // Status check response (custom handling for initial sync)
+    if (line.contains("WIFI_STATUS:") || line.contains("WIFI_STATE:")) {
+      final status = line.split(":").last.trim();
+      final parts = status.split(",");
+      final isConn = parts[0] == "1" || parts[0].toLowerCase() == "true" || parts[0].toLowerCase() == "connected";
+      final ip = parts.length > 1 ? parts[1] : "";
+      
+      if (isConn) _hideWifiLoadingDialog();
+      setState(() {
+        _isWifiConnected = isConn;
+        _wifiIP = ip;
+        _wifiStatus = isConn ? "WiFi connected: $ip" : "WiFi not connected";
+        _isGreenLedOn = isConn;
+        if (isConn) _isConnectingWifi = false;
+      });
+      _saveWifiStatus(isConn, ip: ip);
+      return;
+    }
+
+    // Generic "connected" check if device uses non-standard format or prefixes
+    if (line.toLowerCase().contains("wifi connected") || 
+        line.toLowerCase().contains("connected to wifi") ||
+        line.toLowerCase().contains("status_online") ||
+        line.toLowerCase().contains("wifi_connected")) {
+      
+      _hideWifiLoadingDialog();
+      setState(() {
+        _isWifiConnected = true;
+        _isConnectingWifi = false;
+        _wifiStatus = "WiFi Connected ✅";
+        _isGreenLedOn = true;
+        _showMqttDropdown = true;
+        
+        // If the line contains an IP (e.g. "WIFI_CONNECTED:192.168.1.5")
+        if (line.contains(":")) {
+          final parts = line.split(":");
+          for (var part in parts) {
+            final trimmed = part.trim();
+            if (RegExp(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$').hasMatch(trimmed)) {
+              _wifiIP = trimmed;
+              _wifiStatus = "WiFi Connected: $trimmed";
+              break;
+            }
+          }
+        }
+      });
+      _saveWifiStatus(true, ip: _wifiIP);
+      return;
+    }
+
     // MQTT
-    if (line.startsWith("MQTT_CONNECTED")) {
+    if (line.startsWith("MQTT_CONNECTED") || line.contains("STATUS_ONLINE")) {
       setState(() {
         _isMqttConnected = true;
         _mqttStatus = "MQTT connected ✅";
@@ -527,7 +595,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     }
     try {
       _log("TX: $cmd");
-      _connection.output.add(Uint8List.fromList(utf8.encode("$cmd\n")));
+      _connection.output.add(Uint8List.fromList(utf8.encode("$cmd\r\n"))); // Using \r\n for better compatibility
       await _connection.output.allSent;
     } catch (e) {
       _showSnack("Send failed: $e", _red);
@@ -614,16 +682,29 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       return;
     }
     setState(() {
+      _isWifiConnected = false; 
       _wifiStatus = "Connecting to WiFi...";
       _isConnectingWifi = true;
     });
-    _showWifiLoadingDialog();
+
+    // Send multiple variants to ensure compatibility with different firmware versions
     await _sendCommand("WIFI:$ssid,$pass");
+    await Future.delayed(const Duration(milliseconds: 300));
+    await _sendCommand("WIFI_CONNECT"); 
+    await Future.delayed(const Duration(milliseconds: 300));
+    await _sendCommand("WIFI_START");
+    
+    _showWifiLoadingDialog();
     
     // Auto-dismiss loading dialog after 30 seconds if no response from device
-    Future.delayed(const Duration(seconds: 30), () {
+    // Extended timeout for slow ESP32 WiFi connections
+    Future.delayed(const Duration(seconds: 60), () {
       if (_isConnectingWifi && mounted) {
         _hideWifiLoadingDialog();
+        setState(() {
+          _isConnectingWifi = false;
+          _wifiStatus = "WiFi connection timeout ⏳";
+        });
         _showSnack("WiFi connection timeout. Check device.", _orange);
       }
     });
@@ -958,12 +1039,12 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.4),
+                color: Colors.black.withValues(alpha: 0.4),
                 blurRadius: 30,
                 offset: const Offset(0, 15),
               ),
               BoxShadow(
-                color: _themeGreen.withOpacity(0.15),
+                color: _themeGreen.withValues(alpha: 0.15),
                 blurRadius: 20,
                 offset: const Offset(0, 0),
               ),
@@ -1018,16 +1099,21 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              "Connection to ${_device.name ?? 'device'} lost.",
+              "Connection to ${_device.name ?? 'device'} lost.\nReason: ${_disconnectDisplayReason(_lastDisconnectReason)}\nTime: $_lastDisconnectTime",
               style: const TextStyle(fontSize: 15, color: Colors.white70),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              "Hint: ${_disconnectHint(_lastDisconnectReason)}",
+              style: const TextStyle(fontSize: 12, color: Colors.white54, fontStyle: FontStyle.italic),
             ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: _themeGreen.withOpacity(0.15),
+                color: _themeGreen.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: _themeGreen.withOpacity(0.3)),
+                border: Border.all(color: _themeGreen.withValues(alpha: 0.3)),
               ),
               child: const Row(
                 children: [
@@ -1116,12 +1202,12 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.4),
+                color: Colors.black.withValues(alpha: 0.4),
                 blurRadius: 30,
                 offset: const Offset(0, 15),
               ),
               BoxShadow(
-                color: _themeGreen.withOpacity(0.15),
+                color: _themeGreen.withValues(alpha: 0.15),
                 blurRadius: 20,
                 offset: const Offset(0, 0),
               ),
@@ -1251,7 +1337,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
               onShowSaveRemoteDialog: _showSaveRemoteDialog,
               canSaveRemote: _cfgStatus.contains("All keys captured"),
             )),
-            // RepaintBoundary(child: _buildTerminal()),
+            // RepaintBoundary(child: _buildTerminal()), // Hidden as requested
             const SizedBox(height: 16),
           ],
         ),

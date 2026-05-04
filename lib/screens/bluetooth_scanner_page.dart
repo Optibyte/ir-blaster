@@ -227,7 +227,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              "\"${device.name ?? device.address}\" is not a Sustainabyte IR Blaster device.",
+              "\"${device.name ?? device.address}\" is not an Optibyte IR device.",
               style: const TextStyle(fontSize: 15, color: Colors.white70),
             ),
             const SizedBox(height: 12),
@@ -244,7 +244,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      "Only Sustainabyte devices are supported.",
+                      "Only Optibyte devices are supported.",
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
@@ -278,7 +278,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
   }
 
   Future<void> _connectToDevice(BluetoothDevice device) async {
-    // Check if device is a Sustainabyte IR Blaster
+    // Check if device is an Optibyte IR device
     if (!_isIRBlaster(device.name ?? '')) {
       _showInvalidDeviceDialog(device);
       return;
@@ -435,7 +435,7 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        "Scan for IR Blaster",
+                        "Scan for Optibyte IR",
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,

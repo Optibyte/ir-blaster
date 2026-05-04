@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:esp/core/constants/colors.dart';
-import 'package:esp/core/services/auth_service.dart';
-import 'package:esp/screens/ac_app/home.dart';
-import 'package:esp/screens/main_navigation_page.dart';
+import 'package:ir_blaster_ac/core/constants/colors.dart';
+import 'package:ir_blaster_ac/core/services/auth_service.dart';
+import 'package:ir_blaster_ac/screens/ac_app/home.dart';
+import 'package:ir_blaster_ac/screens/main_navigation_page.dart';
 
 class SignInPage extends StatefulWidget {
   const SignInPage({super.key});

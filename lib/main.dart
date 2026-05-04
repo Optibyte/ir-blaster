@@ -5,13 +5,13 @@ import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 
-import 'package:esp/core/theme/app_theme.dart';
-import 'package:esp/core/theme/theme_provider.dart';
-import 'package:esp/core/constants/colors.dart';
-import 'package:esp/core/services/auth_service.dart' as ac_auth;
-import 'package:esp/screens/ac_app/sigin.dart';
-import 'package:esp/screens/main_navigation_page.dart';
-import 'package:esp/screens/ac_app/splash_screen.dart';
+import 'package:ir_blaster_ac/core/theme/app_theme.dart';
+import 'package:ir_blaster_ac/core/theme/theme_provider.dart';
+import 'package:ir_blaster_ac/core/constants/colors.dart';
+import 'package:ir_blaster_ac/core/services/auth_service.dart' as ac_auth;
+import 'package:ir_blaster_ac/screens/ac_app/sigin.dart';
+import 'package:ir_blaster_ac/screens/main_navigation_page.dart';
+import 'package:ir_blaster_ac/screens/ac_app/splash_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

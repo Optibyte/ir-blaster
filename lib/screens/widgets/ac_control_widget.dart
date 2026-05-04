@@ -140,6 +140,7 @@ class ACControlWidget extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
+              /*
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
@@ -203,6 +204,7 @@ class ACControlWidget extends StatelessWidget {
                   ),
                 ],
               ),
+              */
             ],
           ],
         ),

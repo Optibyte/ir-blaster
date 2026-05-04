@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:esp/core/constants/colors.dart';
-import 'package:esp/core/services/auth_service.dart';
-import 'package:esp/core/theme/theme_provider.dart';
+import 'package:ir_blaster_ac/core/constants/colors.dart';
+import 'package:ir_blaster_ac/core/services/auth_service.dart';
+import 'package:ir_blaster_ac/core/theme/theme_provider.dart';
 import 'package:provider/provider.dart';
 
 /// Redesigned Top Navbar with premium Optibyte branding

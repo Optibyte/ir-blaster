@@ -123,11 +123,11 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   bool _isMqttConnected = false;
   String _mqttStatus = "MQTT not connected";
 
-  final TextEditingController _mqttHostController = TextEditingController(text: "13.66.130.236");
+  final TextEditingController _mqttHostController = TextEditingController(text: "test.mosquitto.org");
   final TextEditingController _mqttPortController = TextEditingController(text: "1883");
-  final TextEditingController _mqttUserController = TextEditingController(text: "mahavirir");
-  final TextEditingController _mqttPassController = TextEditingController(text: "mahavir@123");
-  final TextEditingController _mqttTopicController = TextEditingController(text: "mahavirir");
+  final TextEditingController _mqttUserController = TextEditingController(text: "sustainabyte_demo");
+  final TextEditingController _mqttPassController = TextEditingController(text: "public");
+  final TextEditingController _mqttTopicController = TextEditingController(text: "sustainabyte_demo/time");
 
   // ===================== Auto control =====================
   bool _autoControlEnabled = false;
@@ -848,18 +848,9 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
                     "Mobile Bluetooth: ${_isBluetoothOn ? 'ON' : 'OFF'}",
                     style: TextStyle(fontSize: 12, color: _isBluetoothOn ? _green : _red),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    "Last disconnect: $_lastDisconnectTime",
-                    style: const TextStyle(fontSize: 12, color: Colors.white70),
-                  ),
-                  Text(
-                    "Reason: ${_disconnectDisplayReason(_lastDisconnectReason)}",
-                    style: const TextStyle(fontSize: 12, color: Colors.white70),
-                  ),
-                  Text(
-                    "Hint: ${_disconnectHint(_lastDisconnectReason)}",
-                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                  const Text(
+                    "Status: Active",
+                    style: TextStyle(fontSize: 12, color: Colors.white70),
                   ),
                 ],
               ),
@@ -1260,7 +1251,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
               onShowSaveRemoteDialog: _showSaveRemoteDialog,
               canSaveRemote: _cfgStatus.contains("All keys captured"),
             )),
-            RepaintBoundary(child: _buildTerminal()),
+            // RepaintBoundary(child: _buildTerminal()),
             const SizedBox(height: 16),
           ],
         ),

@@ -48,6 +48,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   String _lunchOff = '--:--';
   bool _isAuto = false;
   bool _isPowerOn = true; // Tracks the MQTT Power Status
+  DateTime? _inactiveStartTime; // Track when device became inactive
+  String _inactiveTimeString = 'N/A'; // Display string for inactive time
 
   // Chart & Log State
   final List<_ChartData> _tempHistory = [];
@@ -75,6 +77,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
   // Polling State
   Timer? _pollTimer;
+  Timer? _inactiveTimeUpdateTimer; // Timer to update inactive time display
   MqttServerClient? _persistentMqttClient;
   String _subscribedDeviceId = '';
 
@@ -107,6 +110,13 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     if (mounted) {
       setState(() => _isTelemetryLoading = false);
     }
+
+    // Setup timer to update inactive time display every second
+    _inactiveTimeUpdateTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+      if (mounted && _inactiveStartTime != null) {
+        _updateInactiveTimeString();
+      }
+    });
   }
 
   Future<void> _loadCachedEquipments() async {
@@ -193,6 +203,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     _closeStream();
     _pulseController?.dispose();
     _pollTimer?.cancel();
+    _inactiveTimeUpdateTimer?.cancel();
     _persistentMqttClient?.disconnect();
     super.dispose();
   }
@@ -447,7 +458,13 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       // 0. Handle JSON Payload
       if (payload.trim().startsWith('{')) {
         try {
-          final data = jsonDecode(payload);
+          // Fix potentially malformed JSON from device (e.g., "set_temp":,)
+          String safePayload = payload;
+          if (safePayload.contains('"set_temp":,')) {
+            safePayload = safePayload.replaceAll('"set_temp":,', '"set_temp":null,');
+          }
+          
+          final data = jsonDecode(safePayload);
           final Map<String, dynamic> p = (data['data'] != null)
               ? Map<String, dynamic>.from(data['data'])
               : Map<String, dynamic>.from(data);
@@ -473,11 +490,22 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             _isOnline = (stVal == 'ONLINE' || stVal == 'TRUE' || stVal == '1');
             hasChanges = true;
           }
+          
           // Schedule parsing from JSON
-          if (p['schedule_on'] != null)
-            _scheduleOn1 = p['schedule_on'].toString();
-          if (p['schedule_off'] != null)
-            _scheduleOff1 = p['schedule_off'].toString();
+          bool scheduleChanged = false;
+          if (p['sch_on1'] != null) { _scheduleOn1 = p['sch_on1'].toString(); scheduleChanged = true; }
+          if (p['sch_off1'] != null) { _scheduleOff1 = p['sch_off1'].toString(); scheduleChanged = true; }
+          if (p['sch_on2'] != null) { _scheduleOn2 = p['sch_on2'].toString(); scheduleChanged = true; }
+          if (p['sch_off2'] != null) { _scheduleOff2 = p['sch_off2'].toString(); scheduleChanged = true; }
+          if (p['sch_on3'] != null) { _scheduleOn3 = p['sch_on3'].toString(); scheduleChanged = true; }
+          if (p['sch_off3'] != null) { _scheduleOff3 = p['sch_off3'].toString(); scheduleChanged = true; }
+          if (p['lunch_on'] != null) { _lunchOn = p['lunch_on'].toString(); scheduleChanged = true; }
+          if (p['lunch_off'] != null) { _lunchOff = p['lunch_off'].toString(); scheduleChanged = true; }
+
+          if (scheduleChanged) {
+            hasChanges = true;
+            debugPrint('✅ [MQTT JSON] Mapped Schedules -> S1: $_scheduleOn1-$_scheduleOff1, S2: $_scheduleOn2-$_scheduleOff2, S3: $_scheduleOn3-$_scheduleOff3, Lunch: $_lunchOn-$_lunchOff');
+          }
         } catch (e) {
           debugPrint('❌ Error parsing MQTT JSON: $e');
         }
@@ -553,11 +581,15 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           upperPayload == 'ACTIVE' ||
           upperPayload.contains('STATUS:ACTIVE')) {
         _isOnline = true;
+        _inactiveStartTime = null; // Clear inactive time when device comes back online
         hasChanges = true;
       } else if (upperPayload == 'OFFLINE' ||
           upperPayload == 'INACTIVE' ||
           upperPayload.contains('STATUS:INACTIVE')) {
         _isOnline = false;
+        if (_inactiveStartTime == null) {
+          _inactiveStartTime = DateTime.now(); // Start tracking inactive time
+        }
         hasChanges = true;
       } else if (upperPayload.startsWith('TEMP:')) {
         final valStr = upperPayload.split(':').last.trim();
@@ -615,14 +647,51 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     return "--:--";
   }
 
-  String _getDeviceTopic(String type) {
-    if (type == 'schedule') return 'testir/schedule';
-    return 'testir/Sustainbyte_testir/$type';
+  void _updateInactiveTimeString() {
+    if (_inactiveStartTime != null) {
+      final duration = DateTime.now().difference(_inactiveStartTime!);
+      final hours = duration.inHours;
+      final minutes = duration.inMinutes.remainder(60);
+      final seconds = duration.inSeconds.remainder(60);
+
+      setState(() {
+        if (hours > 0) {
+          _inactiveTimeString = '${hours}h ${minutes}m ago';
+        } else if (minutes > 0) {
+          _inactiveTimeString = '${minutes}m ${seconds}s ago';
+        } else {
+          _inactiveTimeString = '${seconds}s ago';
+        }
+      });
+    }
   }
 
-  Future<void> _publishMqttCommand(String message, {String? topic}) async {
-    final String broker = AppConfig.mqttBroker;
+  String _getDeviceTopic(String type) {
+    // Unified topic ID as per user request
+    return 'testir/Sustainabyte_testir/$type';
+  }
+
+  Future<void> _publishMqttCommand(String message, {String? topic, bool allowOffline = false}) async {
+    if (!_isOnline && !allowOffline) {
+      _showOfflineWarning();
+      return;
+    }
     final String targetTopic = topic ?? _getDeviceTopic('control');
+
+    // Fast Path: Reuse existing persistent connection
+    if (_persistentMqttClient != null &&
+        _persistentMqttClient!.connectionStatus!.state ==
+            MqttConnectionState.connected) {
+      final builder = MqttClientPayloadBuilder();
+      builder.addString(message);
+      _persistentMqttClient!
+          .publishMessage(targetTopic, MqttQos.atLeastOnce, builder.payload!);
+      _handleOptimisticUpdate(message);
+      return;
+    }
+
+    // Slow Path: Fallback to one-off connection
+    final String broker = AppConfig.mqttBroker;
     final String username = AppConfig.mqttUsername;
     final String password = AppConfig.mqttPassword;
 
@@ -632,47 +701,42 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     );
     client.port = 1883;
     client.logging(on: false);
-
-    final connMessage = MqttConnectMessage()
+    client.connectionMessage = MqttConnectMessage()
         .withClientIdentifier(
             'flutter_cmd_${DateTime.now().millisecondsSinceEpoch}')
         .authenticateAs(username, password)
         .startClean();
-    client.connectionMessage = connMessage;
 
     try {
-      debugPrint(
-          'ðŸ“¡ [MQTT CMD] Connecting to publish: $message to $targetTopic');
       await client.connect();
       if (client.connectionStatus!.state == MqttConnectionState.connected) {
         final builder = MqttClientPayloadBuilder();
         builder.addString(message);
         client.publishMessage(
             targetTopic, MqttQos.atLeastOnce, builder.payload!);
-        debugPrint('âœ… [MQTT CMD] Published: $message to $targetTopic');
-
-        // Optimistic UI update and lock
-        setState(() {
-          _lastManualCommandTime = DateTime.now();
-          _isPowerCommandLock = true;
-          if (message == 'ON') {
-            _isPowerOn = true;
-          } else if (message == 'OFF') {
-            _isPowerOn = false;
-          }
-        });
-
-        // Unlock after 5 seconds to allow stream to take over again
-        Future.delayed(const Duration(seconds: 5), () {
-          if (mounted) setState(() => _isPowerCommandLock = false);
-        });
-
+        _handleOptimisticUpdate(message);
         await Future.delayed(const Duration(milliseconds: 500));
         client.disconnect();
       }
     } catch (e) {
-      debugPrint('âŒ [MQTT CMD] Error: $e');
+      debugPrint('❌ [MQTT CMD] Error: $e');
     }
+  }
+
+  void _handleOptimisticUpdate(String message) {
+    if (!mounted) return;
+    setState(() {
+      _lastManualCommandTime = DateTime.now();
+      _isPowerCommandLock = true;
+      if (message == 'ON') {
+        _isPowerOn = true;
+      } else if (message == 'OFF') {
+        _isPowerOn = false;
+      }
+    });
+    Future.delayed(const Duration(seconds: 5), () {
+      if (mounted) setState(() => _isPowerCommandLock = false);
+    });
   }
 
   Future<String> _fetchEquipmentImei(String equipmentId) async {
@@ -833,78 +897,6 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           if (newOnline != _isOnline) hasChanges = true;
         }
 
-        // Parsing multiple schedules
-        for (int i = 1; i <= 3; i++) {
-          String keyOn = 'schedule_on$i';
-          String keyOff = 'schedule_off$i';
-
-          if (payload[keyOn] != null) {
-            String val = payload[keyOn].toString();
-            if (i == 1) {
-              if (val != _scheduleOn1) {
-                _scheduleOn1 = val;
-                hasChanges = true;
-              }
-            }
-            if (i == 2) {
-              if (val != _scheduleOn2) {
-                _scheduleOn2 = val;
-                hasChanges = true;
-              }
-            }
-            if (i == 3) {
-              if (val != _scheduleOn3) {
-                _scheduleOn3 = val;
-                hasChanges = true;
-              }
-            }
-          }
-          if (payload[keyOff] != null) {
-            String val = payload[keyOff].toString();
-            if (i == 1) {
-              if (val != _scheduleOff1) {
-                _scheduleOff1 = val;
-                hasChanges = true;
-              }
-            }
-            if (i == 2) {
-              if (val != _scheduleOff2) {
-                _scheduleOff2 = val;
-                hasChanges = true;
-              }
-            }
-            if (i == 3) {
-              if (val != _scheduleOff3) {
-                _scheduleOff3 = val;
-                hasChanges = true;
-              }
-            }
-          }
-        }
-
-        // Legacy support/Fallback for single schedule key
-        if (payload['schedule_on'] != null && _scheduleOn1 == '--:--') {
-          _scheduleOn1 = payload['schedule_on'].toString();
-          hasChanges = true;
-        }
-        if (payload['schedule_off'] != null && _scheduleOff1 == '--:--') {
-          _scheduleOff1 = payload['schedule_off'].toString();
-          hasChanges = true;
-        }
-
-        String newLunchOn = _lunchOn;
-        if (payload['lunch_on'] != null || payload['lunchOn'] != null) {
-          newLunchOn = (payload['lunch_on'] ?? payload['lunchOn']).toString();
-          if (newLunchOn != _lunchOn) hasChanges = true;
-        }
-
-        String newLunchOff = _lunchOff;
-        if (payload['lunch_off'] != null || payload['lunchOff'] != null) {
-          newLunchOff =
-              (payload['lunch_off'] ?? payload['lunchOff']).toString();
-          if (newLunchOff != _lunchOff) hasChanges = true;
-        }
-
         bool newAuto = _isAuto;
         if (payload['auto'] != null || payload['isAuto'] != null) {
           newAuto = (payload['auto'] ?? payload['isAuto']) == true;
@@ -918,9 +910,6 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             if (hasChanges) {
               if (!_isPowerCommandLock) _isPowerOn = newPowerOn;
               _isOnline = newOnline;
-              // Schedule updates are handled inside the loop above
-              _lunchOn = newLunchOn;
-              _lunchOff = newLunchOff;
               _isAuto = newAuto;
               _lastUpdateTime = DateTime.now();
 
@@ -1028,8 +1017,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                       _publishMqttCommand('TEMP_CN:${val.toInt()}');
                     },
                     onClearTemp: () {
-                      setState(() => _setTemperature = 0.0);
-                      _publishMqttCommand('TEMP_CLEAR');
+                      setState(() => _setTemperature = 24.0);
+                      _publishMqttCommand('TEMP_CN:24');
                     },
                   ),
                 ),
@@ -1835,10 +1824,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(child: _buildStatusCard(isDark)),
-              if (_isOnline) ...[
-                const SizedBox(width: 12),
-                Expanded(child: _buildHumidityCard(isDark)),
-              ],
+              if (_isOnline) const SizedBox(width: 12),
+              if (_isOnline) Expanded(child: _buildHumidityCard(isDark)),
             ],
           ),
           const SizedBox(height: 24),
@@ -2008,13 +1995,30 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                 size: 18,
               ),
               const SizedBox(width: 8),
-              Text(
-                _isOnline ? 'ACTIVE' : 'INACTIVE',
-                style: GoogleFonts.poppins(
-                  color: isDark ? Colors.white : Colors.black,
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _isOnline ? 'ACTIVE' : 'INACTIVE',
+                    style: GoogleFonts.poppins(
+                      color: isDark ? Colors.white : Colors.black,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (!_isOnline && _inactiveTimeString != 'N/A')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        _inactiveTimeString,
+                        style: GoogleFonts.poppins(
+                          color: isDark ? Colors.white54 : Colors.black54,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ],
           ),
@@ -2460,7 +2464,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       payloadStr = '${type}${index <= 3 ? index : ''}:$time';
     }
 
-    _publishMqttCommand(payloadStr, topic: 'testir/schedule');
+    // Publish to daily schedule topic using unified topic generator
+    _publishMqttCommand(payloadStr, topic: _getDeviceTopic('schedule'), allowOffline: true);
   }
 
   void _showOfflineWarning() {
@@ -3877,7 +3882,7 @@ class _InteractiveThermostatGauge extends StatelessWidget {
     }
 
     double newTemp = (relativeAngle / sweepAngle) * 40;
-    newTemp = newTemp.clamp(0.0, 40.0).roundToDouble();
+    newTemp = newTemp.clamp(16.0, 30.0).roundToDouble();
 
     onTempChanged(newTemp);
   }
@@ -3901,7 +3906,7 @@ class _InteractiveThermostatGauge extends StatelessWidget {
         // Minus Button
         _buildSideControl(
           icon: Icons.remove,
-          onTap: () => onTempChanged((setTemp - 1).clamp(0.0, 40.0)),
+          onTap: () => onTempChanged((setTemp - 1).clamp(16.0, 30.0)),
           color: activeColor,
           size: buttonSize,
         ),
@@ -4017,7 +4022,7 @@ class _InteractiveThermostatGauge extends StatelessWidget {
         // Plus Button
         _buildSideControl(
           icon: Icons.add,
-          onTap: () => onTempChanged((setTemp + 1).clamp(0.0, 40.0)),
+          onTap: () => onTempChanged((setTemp + 1).clamp(16.0, 30.0)),
           color: activeColor,
           size: buttonSize,
         ),
@@ -4033,9 +4038,8 @@ class _InteractiveThermostatGauge extends StatelessWidget {
   }) {
     // Auto-color: green for +, red for −
     final isPlus = icon == Icons.add || icon == Icons.add_rounded;
-    final accentColor = isPlus
-        ? const Color(0xFF6CC042)
-        : const Color(0xFFEF4444);
+    final accentColor =
+        isPlus ? const Color(0xFF6CC042) : const Color(0xFFEF4444);
 
     return GestureDetector(
       onTap: onTap,
@@ -4069,8 +4073,6 @@ class _InteractiveThermostatGauge extends StatelessWidget {
     );
   }
 }
-
-
 
 class _InteractiveThermostatPainter extends CustomPainter {
   final double setTemp;
@@ -4490,7 +4492,9 @@ class _ScheduleControlDialogState extends State<_ScheduleControlDialog> {
         color: Colors.white.withOpacity(0.03),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: isActive ? color.withOpacity(0.3) : Colors.white.withOpacity(0.05),
+          color: isActive
+              ? color.withOpacity(0.3)
+              : Colors.white.withOpacity(0.05),
         ),
         boxShadow: isActive
             ? [
@@ -4608,7 +4612,7 @@ class _ScheduleControlDialogState extends State<_ScheduleControlDialog> {
     Color themeColor,
   ) {
     final bool isSet = current != '--:--';
-    
+
     return GestureDetector(
       onTap: () async {
         final picked = await showTimePicker(
@@ -4637,10 +4641,14 @@ class _ScheduleControlDialogState extends State<_ScheduleControlDialog> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
         decoration: BoxDecoration(
-          color: isSet ? themeColor.withOpacity(0.08) : Colors.white.withOpacity(0.03),
+          color: isSet
+              ? themeColor.withOpacity(0.08)
+              : Colors.white.withOpacity(0.03),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: isSet ? themeColor.withOpacity(0.4) : Colors.white.withOpacity(0.08),
+            color: isSet
+                ? themeColor.withOpacity(0.4)
+                : Colors.white.withOpacity(0.08),
           ),
         ),
         child: Column(

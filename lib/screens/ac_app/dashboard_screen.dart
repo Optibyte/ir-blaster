@@ -196,7 +196,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
           child: Row(
             children: [
-              _chip('Dashboard', 0, isDark),
+              _chip('Summary', 0, isDark),
               const SizedBox(width: 10),
               _chip('Trends', 1, isDark),
             ],

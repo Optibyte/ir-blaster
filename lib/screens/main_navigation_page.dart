@@ -44,9 +44,9 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
               bottom: false,
               child: TopNavbar(
                 showIcons: true,
-                hideBranding: _currentIndex == 2,
-                title: _currentIndex == 1 ? 'DASHBOARD' : 'SYSTEMS VIEW',
-                totalCount: _currentIndex == 2 ? '$_systemCount' : null,
+                hideBranding: _currentIndex == 1, // Hide branding on Systems View
+                title: _currentIndex == 1 ? 'SYSTEMS VIEW' : 'SUMMARY',
+                totalCount: _currentIndex == 1 ? '$_systemCount' : null,
               ),
             ),
 
@@ -56,7 +56,6 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
               onPageChanged: (index) => setState(() => _currentIndex = index),
               children: [
                 const ModeSelectionPage(),
-                const DashboardScreen(),
                 SystemViewPage(
                   onCountChanged: (count) => setState(() => _systemCount = count),
                   onViewPressed: (systemId, systemName, systemShortId) {
@@ -72,6 +71,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                     );
                   },
                 ),
+                const DashboardScreen(),
               ],
             ),
           ),
@@ -159,14 +159,14 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
               label: 'Back',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.dashboard_outlined),
-              activeIcon: Icon(Icons.dashboard_rounded),
-              label: 'Dashboard',
-            ),
-            BottomNavigationBarItem(
               icon: Icon(Icons.layers_outlined),
               activeIcon: Icon(Icons.layers_rounded),
               label: 'Systems',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.dashboard_outlined),
+              activeIcon: Icon(Icons.dashboard_rounded),
+              label: 'Summary',
             ),
           ],
         ),

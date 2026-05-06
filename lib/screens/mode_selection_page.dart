@@ -344,13 +344,19 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
             },
           ),
           const SizedBox(height: 6),
-          const Text(
-            "Sustainabyte User",
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
+          FutureBuilder<Map<String, dynamic>?>(
+            future: AuthService.getUserData(),
+            builder: (context, snapshot) {
+              final name = snapshot.data?['name'] ?? 'Sustainabyte User';
+              return Text(
+                name,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              );
+            },
           ),
           const SizedBox(height: 4),
           const Text(

@@ -69,6 +69,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final companyId = await AuthService.getCompanyId() ?? '';
       final siteId = await AuthService.getSiteId() ?? '';
       final zoneId = await AuthService.getZoneId() ?? '';
+      final bucket = await AuthService.getBucket() ?? '';
       final token = await AuthService.getCookieHeader() ?? '';
 
       final url =
@@ -101,27 +102,65 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (systemsResponse.statusCode == 200) {
             final sBody = jsonDecode(systemsResponse.body);
             if (sBody['status'] == 1 && sBody['data'] != null) {
+              final currentBucket = bucket.toLowerCase();
               for (var s in sBody['data']) {
-                sMap[s['systemId']] = s['name'];
+                final sShortId = (s['shortId'] ?? s['ShortId'] ?? s['systemShortId'] ?? s['SystemShortId'] as String?)?.toLowerCase() ?? '';
+                final sId = (s['systemId'] ?? s['SystemId'] ?? s['id'] ?? s['Id'])?.toString();
+                final sName = (s['name'] ?? s['Name'] ?? s['systemName'] ?? s['SystemName']) as String? ?? 'Unknown System';
+                
+                // Trust the API's filtering. If it's in the response, include it.
+                if (sId != null) {
+                  sMap[sId] = sName;
+                }
               }
             }
           }
 
-          // Pre-calculate grouping to avoid expensive build logic
+          // Pre-calculate grouping and filter equipments locally
           final Map<String, List<dynamic>> gMap = {};
-          final equipments = body['data'] ?? [];
-          for (var e in equipments) {
+          final List<dynamic> allEquipments = body['data'] ?? [];
+          final List<dynamic> filteredEquipments = [];
+
+          for (var e in allEquipments) {
             final sId = e['systemId'];
-            final sysName = (sId != null && sMap.containsKey(sId))
-                ? sMap[sId]!
-                : (e['acType'] ?? 'General System');
-            gMap.putIfAbsent(sysName, () => []).add(e);
+            // Only include equipment if its system is in our filtered map (bucket matched)
+            if (sId != null && sMap.containsKey(sId)) {
+              final sysName = sMap[sId]!;
+              gMap.putIfAbsent(sysName, () => []).add(e);
+              filteredEquipments.add(e);
+            }
           }
+
+          // Recalculate summary based on filtered equipments
+          int total = filteredEquipments.length;
+          int on = 0;
+          int off = 0;
+          int notConnected = 0;
+
+          for (var e in filteredEquipments) {
+            final status = e['onOffStatus'];
+            if (status != null && status['isOnline'] == true) {
+              if (status['acStatus'] == 'ON') {
+                on++;
+              } else {
+                off++;
+              }
+            } else {
+              notConnected++;
+            }
+          }
+
+          final localSummary = {
+            'total': total,
+            'on': on,
+            'off': off,
+            'notConnected': notConnected,
+          };
 
           if (mounted) {
             setState(() {
-              _summary = body['summary'];
-              _equipments = equipments;
+              _summary = localSummary;
+              _equipments = filteredEquipments;
               _systemsMap = sMap;
               _groupedEquipments = gMap;
               _isLoading = false;
@@ -129,9 +168,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             
             // Save to cache for next time
             LocalCacheService.saveDashboardData({
-              'summary': _summary,
-              'equipments': _equipments,
-              'systemsMap': _systemsMap,
+              'summary': localSummary,
+              'equipments': filteredEquipments,
+              'systemsMap': sMap,
             });
           }
         }

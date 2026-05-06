@@ -29,18 +29,17 @@ class _SystemViewPageState extends State<SystemViewPage> {
   }
 
   Future<void> _fetchAndFilterSystems() async {
-    // 1. Retrieve stored credentials
     final companyId = await AuthService.getCompanyId() ?? '';
     final siteId = await AuthService.getSiteId() ?? '';
     final bucket = await AuthService.getBucket() ?? '';
     final token = await AuthService.getCookieHeader() ?? '';
 
-    // 2. Construct the API URL
+    // Reverting to /systems endpoint as per user's latest instruction
     final apiUrl =
         '${AppConfig.provisionBaseUrl}/systems'
         '?companyId=$companyId&siteId=$siteId&bucket=$bucket';
 
-    debugPrint('🌐 [SystemView] Fetching from API: $apiUrl');
+    debugPrint('🌐 [SystemView] Fetching Systems: $apiUrl');
 
     try {
       final response = await http.get(
@@ -51,42 +50,43 @@ class _SystemViewPageState extends State<SystemViewPage> {
         },
       );
 
-      debugPrint('📥 [SystemView] Response Status: ${response.statusCode}');
-      debugPrint('📥 [SystemView] Response Body: ${response.body}');
-
       if (response.statusCode == 200) {
         final Map<String, dynamic> responseData =
             jsonDecode(response.body) as Map<String, dynamic>;
         final List<dynamic> data = responseData['data'] as List<dynamic>;
 
-        // Filter and map the data (Looking for items where systemType name is "AC Monitoring System")
         final filteredSystems = data.where((item) {
-          final systemType = item['systemType'] as Map<String, dynamic>?;
+          final systemType = (item['systemType'] ?? item['SystemType']) as Map<String, dynamic>?;
           final typeName =
-              (systemType?['name'] as String?)?.toLowerCase() ?? '';
-          return typeName.contains('ac monitoring');
+              ((systemType?['name'] ?? systemType?['Name']) as String?)?.toLowerCase() ?? '';
+
+          final systemShortId = (item['shortId'] ?? item['ShortId'] ?? item['systemShortId'] ?? item['SystemShortId'] as String?)?.toLowerCase() ?? '';
+          final currentBucket = bucket.toLowerCase();
+
+          // Check if it's an AC Monitoring system
+          final isAcSystem = typeName.contains('ac monitoring') || typeName.contains('ac monitoring system');
+          
+          // Trust the API's filtering by bucket/site/company.
+          // Local filtering is too strict and can hide valid systems.
+          return isAcSystem;
         }).map((item) {
-          final name = item['name'] as String? ?? 'Unknown System';
-          final id = item['systemId'] as String? ?? 'No ID';
-          final shortId =
-              item['shortId'] as String? ?? name; // Fallback to name
-          final systemType = item['systemType'] as Map<String, dynamic>?;
-          final typeName = systemType?['name'] as String? ?? 'AC System';
+          final name = (item['name'] ?? item['Name'] ?? item['systemName'] ?? item['SystemName']) as String? ?? 'Unknown System';
+          final id = (item['systemId'] ?? item['SystemId'] ?? item['id'] ?? item['Id']) as String? ?? 'No ID';
+          final shortId = (item['shortId'] ?? item['ShortId'] ?? item['systemShortId'] ?? item['SystemShortId']) as String? ?? name;
+          final systemType = (item['systemType'] ?? item['SystemType']) as Map<String, dynamic>?;
+          final typeName = (systemType?['name'] ?? systemType?['Name']) as String? ?? 'AC System';
+
+          debugPrint('✅ [SystemView] Mapped System: $name ($id) with shortId: $shortId');
 
           return SystemItem(
             title: name.toUpperCase(),
             originalName: name,
-            equipment:
-                typeName, // Showing the system type name (e.g. "AC Monitoring System")
+            equipment: typeName,
             systemId: id,
             systemShortId: shortId,
             iconColor: const Color(0xFF6CC042),
           );
         }).toList();
-
-        debugPrint(
-          '✅ [SystemView] Filtered ${filteredSystems.length} AC Monitoring systems',
-        );
 
         if (mounted) {
           widget.onCountChanged?.call(filteredSystems.length);
@@ -96,82 +96,56 @@ class _SystemViewPageState extends State<SystemViewPage> {
           });
         }
       } else {
-        debugPrint('❌ [SystemView] Error: ${response.body}');
         if (mounted) setState(() => isLoading = false);
       }
     } catch (e) {
-      debugPrint('❌ [SystemView] Exception during fetch: $e');
       if (mounted) setState(() => isLoading = false);
     }
   }
 
   Future<void> _fetchEquipments(String systemId) async {
-    final companyId = await AuthService.getCompanyId() ?? '';
-    final siteId = await AuthService.getSiteId() ?? '';
-    final bucket = await AuthService.getBucket() ?? '';
-    final token = await AuthService.getCookieHeader() ?? '';
-
-    final url =
-        '${AppConfig.provisionBaseUrl}/systems/equipment/$systemId'
-        '?companyId=$companyId&siteId=$siteId&bucket=$bucket';
-
-    debugPrint('🌐 [SystemView] Fetching Equipments: $url');
-
-    try {
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      debugPrint(
-        '📥 [SystemView] Equipments Response (${response.statusCode}): ${response.body}',
-      );
-    } catch (e) {
-      debugPrint('❌ [SystemView] Exception fetching equipments: $e');
-    }
+    // No-op or keep for background sync if needed
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Column(
-      children: [
-        const SizedBox(height: 16),
-        // Systems List
-        Expanded(
-          child: isLoading
-              ? Center(
-                  child: CircularProgressIndicator(color: colorScheme.primary),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: systems.length,
-                  itemBuilder: (context, index) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _SystemCard(
-                        system: systems[index],
-                        onViewPressed:
-                            (String id, String name, String shortId) {
-                          // 1. Fetch equipment details for this system
-                          _fetchEquipments(id);
-
-                          // 2. Original callback
-                          if (widget.onViewPressed != null) {
-                            widget.onViewPressed!(id, name, shortId);
-                          }
-                        },
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ],
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF120E1F), // Deep Dark Purple Background
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header Section (Reduced as per user request to remove 'Equipment View' text)
+          const SizedBox(height: 24),
+          
+          // Systems List
+          Expanded(
+            child: isLoading
+                ? const Center(
+                    child: CircularProgressIndicator(color: Color(0xFF6CC042)),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    itemCount: systems.length,
+                    itemBuilder: (context, index) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: _SystemCard(
+                          system: systems[index],
+                          onViewPressed:
+                              (String id, String name, String shortId) {
+                            if (widget.onViewPressed != null) {
+                              widget.onViewPressed!(id, name, shortId);
+                            }
+                          },
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -203,99 +177,68 @@ class _SystemCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final colorScheme = Theme.of(context).colorScheme;
-
     return GestureDetector(
-      onTap: () {
-        debugPrint(
-          '[SystemView] Tapped systemId: ${system.systemId}, shortId: ${system.systemShortId}, name: ${system.originalName}',
-        );
-        onViewPressed(
-            system.systemId, system.originalName, system.systemShortId);
-      },
+      onTap: () => onViewPressed(system.systemId, system.originalName, system.systemShortId),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF26213A) : Colors.white,
-          borderRadius: BorderRadius.circular(24),
+          color: const Color(0xFF1E1A2D), // Lighter Purple Card Background
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isDark
-                ? Colors.white.withOpacity(0.06)
-                : const Color(0xFFE2E8F0),
+            color: Colors.white.withOpacity(0.08),
             width: 1,
           ),
-          boxShadow: [
-            if (!isDark)
-              BoxShadow(
-                color: const Color(0xFF0F172A).withOpacity(0.05),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
-              ),
-          ],
         ),
         child: Row(
           children: [
-            // Professional Icon Container
+            // Icon matching Web
             Container(
-              width: 52,
-              height: 52,
+              width: 50,
+              height: 50,
               decoration: BoxDecoration(
-                color: isDark
-                    ? system.iconColor.withOpacity(0.08)
-                    : system.iconColor.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(16),
-                border: !isDark
-                    ? Border.all(color: system.iconColor.withOpacity(0.1))
-                    : null,
+                color: const Color(0xFF6CC042).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF6CC042).withOpacity(0.2)),
               ),
-              child: Icon(
+              child: const Icon(
                 Icons.apartment_rounded,
-                color: system.iconColor,
-                size: 26,
+                color: Color(0xFF6CC042),
+                size: 28,
               ),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 20),
             // Content
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    system.title,
-                    style: GoogleFonts.poppins(
-                      color: isDark ? Colors.white : const Color(0xFF1B172E),
-                      fontSize: 14,
+                    system.equipment,
+                    style: GoogleFonts.outfit(
+                      color: Colors.white,
+                      fontSize: 18,
                       fontWeight: FontWeight.w600,
-                      letterSpacing: 0.2,
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    system.equipment,
-                    style: GoogleFonts.poppins(
-                      color: (isDark ? Colors.white : Colors.black)
-                          .withOpacity(0.3),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
+                  const SizedBox(height: 8),
+                  // System Name Badge matching requested layout
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0E0B16), // Dark Pill
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.white.withOpacity(0.05)),
+                    ),
+                    child: Text(
+                      system.originalName,
+                      style: GoogleFonts.outfit(
+                        color: Colors.white.withOpacity(0.9),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ],
-              ),
-            ),
-            // Right Side Navigation Icon
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: isDark
-                    ? Colors.white.withOpacity(0.03)
-                    : Colors.black.withOpacity(0.02),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.chevron_right_rounded,
-                color: isDark ? Colors.white24 : Colors.black26,
-                size: 20,
               ),
             ),
           ],

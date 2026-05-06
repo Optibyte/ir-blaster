@@ -38,8 +38,12 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   double _actualTemperature = 0.0;
   bool _isOnline = true; // Tracks WIFI/Online status
   int _humidity = 0;
-  String _scheduleOn = '--:--';
-  String _scheduleOff = '--:--';
+  String _scheduleOn1 = '--:--';
+  String _scheduleOff1 = '--:--';
+  String _scheduleOn2 = '--:--';
+  String _scheduleOff2 = '--:--';
+  String _scheduleOn3 = '--:--';
+  String _scheduleOff3 = '--:--';
   String _lunchOn = '--:--';
   String _lunchOff = '--:--';
   bool _isAuto = false;
@@ -64,7 +68,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   StreamSubscription? _subscription;
   DateTime _lastUpdateTime = DateTime.now(); // For throttling UI updates
   DateTime _lastManualCommandTime = DateTime.fromMillisecondsSinceEpoch(0);
-  bool _isPowerCommandLock = false; 
+  bool _isPowerCommandLock = false;
 
   // Animation State
   AnimationController? _pulseController;
@@ -72,6 +76,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   // Polling State
   Timer? _pollTimer;
   MqttServerClient? _persistentMqttClient;
+  String _subscribedDeviceId = '';
 
   @override
   void initState() {
@@ -97,7 +102,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     _setupPersistentMqtt();
     _loadCachedStatus();
     _loadCachedEquipments();
-    
+
     // Telemetry is no longer "loading" once we have the persistent connection active
     if (mounted) {
       setState(() => _isTelemetryLoading = false);
@@ -115,7 +120,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     if (!mounted) return;
     setState(() {
       try {
-        _equipmentsData = equipmentList.map((e) => Map<String, dynamic>.from(e)).toList();
+        _equipmentsData =
+            equipmentList.map((e) => Map<String, dynamic>.from(e)).toList();
         _equipments = _equipmentsData
             .map((e) => e['name']?.toString() ?? 'Unknown')
             .toList();
@@ -127,24 +133,54 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           );
           final targetIndex = initialIndex != -1 ? initialIndex : 0;
           final Map<String, dynamic> eData = _equipmentsData[targetIndex];
-          
-          _selectedEquipmentId = eData['equipmentId']?.toString() ?? '';
-          _selectedEquipmentName = eData['name']?.toString() ?? '';
-          _selectedEquipmentTypeId = eData['equipmentTypeId']?.toString() ?? '';
-          _selectedEquipmentShortId = (eData['shortId'] ?? eData['equipmentShortId'])?.toString() ?? '';
+
+          _selectedEquipmentId = (eData['equipmentId'] ??
+                      eData['EquipmentId'] ??
+                      eData['id'] ??
+                      eData['Id'])
+                  ?.toString() ??
+              '';
+          _selectedEquipmentName =
+              (eData['name'] ?? eData['Name'])?.toString() ?? '';
+          _selectedEquipmentTypeId =
+              (eData['equipmentTypeId'] ?? eData['EquipmentTypeId'])
+                      ?.toString() ??
+                  '';
+          _selectedEquipmentShortId = (eData['shortId'] ??
+                      eData['ShortId'] ??
+                      eData['equipmentShortId'] ??
+                      eData['SystemShortId'])
+                  ?.toString() ??
+              '';
+
+          // Prioritize IMEI for MQTT communication as requested
+          final imei = (eData['imei'] ?? eData['Imei'])?.toString() ?? '';
+          _deviceId = imei.isNotEmpty
+              ? imei
+              : (_selectedEquipmentShortId.isNotEmpty
+                  ? _selectedEquipmentShortId
+                  : _selectedEquipmentId);
+
+          debugPrint(
+              '📡 [DeviceDetail] Active Device ID (Topic): $_deviceId (IMEI: $imei)');
+
+          // Re-trigger MQTT setup with the new ID if it changed
+          _setupPersistentMqtt();
         }
       } catch (e) {
-        debugPrint('⚠️ Error mapping equipment data: $e');
+        debugPrint('âš ï¸ Error mapping equipment data: $e');
       }
     });
   }
 
   Future<void> _loadCachedStatus() async {
-    final cached = await LocalCacheService.getDeviceStatus(widget.systemShortId);
+    final cached =
+        await LocalCacheService.getDeviceStatus(widget.systemShortId);
     if (cached != null && mounted) {
       final status = cached['status'];
       setState(() {
-        if (status['temp'] != null) _actualTemperature = (status['temp'] as num).toDouble();
+        if (status['temp'] != null)
+          _actualTemperature = (status['temp'] as num).toDouble();
         if (status['hum'] != null) _humidity = (status['hum'] as num).toInt();
         if (status['power'] != null) _isPowerOn = status['power'] as bool;
         if (status['online'] != null) _isOnline = status['online'] as bool;
@@ -190,7 +226,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final dynamic listData = data['data'];
-        
+
         if (listData != null && listData is List && mounted) {
           final List<dynamic> equipmentList = listData;
           _applyEquipmentData(equipmentList);
@@ -218,16 +254,45 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       '🔄 SWITCHING EQUIPMENT: ID=$equipmentId, Name=$name, ShortId=$shortId',
     );
     if (_selectedEquipmentId == equipmentId &&
-        _selectedEquipmentShortId.isNotEmpty)
-      return;
+        _selectedEquipmentShortId.isNotEmpty) return;
 
     _closeStream();
+
+    // Fetch full equipment details to get the IMEI if not already available
+    String deviceId = shortId;
+    try {
+      final token = await AuthService.getCookieHeader() ?? '';
+      final url = '${AppConfig.provisionBaseUrl}/equipments/$equipmentId';
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final equipData = data['data'];
+        if (equipData != null) {
+          final imei =
+              (equipData['imei'] ?? equipData['Imei'])?.toString() ?? '';
+          if (imei.isNotEmpty) {
+            deviceId = imei;
+            debugPrint('📡 [DeviceDetail] Resolved IMEI from API: $deviceId');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error fetching equipment details for IMEI: $e');
+    }
 
     setState(() {
       _selectedEquipmentId = equipmentId;
       _selectedEquipmentName = name;
       _selectedEquipmentTypeId = typeId;
       _selectedEquipmentShortId = shortId;
+      _deviceId = deviceId; // Set to IMEI if found, else fallback to shortId
       _isLoadingEquipments = true;
       _isTelemetryLoading = true;
       _tempHistory.clear();
@@ -240,6 +305,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       setState(() {
         _deviceId = imei;
         _isLoadingEquipments = false;
+        _setupPersistentMqtt();
       });
 
       if (imei.isNotEmpty) {
@@ -252,11 +318,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   }
 
   Future<void> _togglePower(bool value) async {
-    if (!_isOnline) {
-      _showOfflineWarning();
-      return;
-    }
-    debugPrint('🔔 [ACTION] POWER TOGGLE: IMEI=$_deviceId, NewValue=$value');
+    debugPrint('ðŸ”” [ACTION] POWER TOGGLE: IMEI=$_deviceId, NewValue=$value');
     final companyId = await AuthService.getCompanyId() ?? '';
     final token = await AuthService.getCookieHeader() ?? '';
 
@@ -285,120 +347,43 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         );
       }
     } catch (e) {
-      debugPrint('❌ Error fetching MQTT configs: $e');
+      debugPrint('âŒ Error fetching MQTT configs: $e');
     }
 
     if (selectedConfig == null) {
-      debugPrint(
-        '⚠️ No AC Compressor MQTT config found, falling back to defaults.',
-      );
-      // You might want to show a snackbar here if no config is found
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Error: No valid MQTT configuration found for this device type.',
-            ),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
-      return;
+      debugPrint('âš ï¸ No AC Compressor MQTT config found, using defaults.');
     }
 
-    final String broker = AppConfig.mqttBroker;
-    final String topic = AppConfig.mqttTopic;
-    final String username = AppConfig.mqttUsername;
-    final String password = AppConfig.mqttPassword;
+    _publishMqttCommand(value ? 'ON' : 'OFF');
 
-    // Direct MQTT connection from Frontend
-    final client = MqttServerClient(
-      broker,
-      'flutter_ac_${DateTime.now().millisecondsSinceEpoch}',
-    );
-    client.port = 1883;
-    client.logging(on: false);
-    client.keepAlivePeriod = 20;
-
-    final connMessage = MqttConnectMessage()
-        .withClientIdentifier(
-          'flutter_ac_${DateTime.now().millisecondsSinceEpoch}',
-        )
-        .authenticateAs(username, password)
-        .startClean()
-        .withWillQos(MqttQos.atLeastOnce);
-    client.connectionMessage = connMessage;
-
-    // Optimistic UI update
-    setState(() => _isPowerOn = value);
-
-    try {
-      debugPrint('📡 MQTT [DYNAMIC]: Connecting to $broker as $username...');
-      await client.connect();
-
-      if (client.connectionStatus!.state == MqttConnectionState.connected) {
-        debugPrint('✅ MQTT [DYNAMIC]: Connected');
-
-        final String status = value ? "STATUS_ON" : "STATUS_OFF";
-        final String payload = '${AppConfig.mqttPayloadPrefix}:$status';
-
-        final builder = MqttClientPayloadBuilder();
-        builder.addString(payload);
-
-        // Detailed logging for verification
-        debugPrint('--------------------------------------------------');
-        debugPrint('🚀 [MQTT COMMAND SENT]');
-        debugPrint('📍 Topic:    $topic');
-        debugPrint('📦 Payload:  $payload');
-        debugPrint(
-          '📝 Equivalent: mosquitto_pub -h "$broker" -p 1883 -u "$username" -P "$password" -t "$topic" -m "$payload"',
-        );
-        debugPrint('--------------------------------------------------');
-
-        client.publishMessage(topic, MqttQos.atLeastOnce, builder.payload!);
-
-        // Brief delay to ensure message is sent before disconnecting
-        await Future.delayed(const Duration(milliseconds: 500));
-        client.disconnect();
-        debugPrint('🔌 MQTT [DYNAMIC]: Disconnected');
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Power ${value ? 'ON' : 'OFF'} for Device: demo'),
-              backgroundColor: value ? Colors.green : Colors.redAccent,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      } else {
-        throw Exception(
-          'Connection failed with state: ${client.connectionStatus!.state}',
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ MQTT [DYNAMIC] Error: $e');
-      setState(() => _isPowerOn = !value); // Rollback
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('MQTT Error: $e'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              'Power ${value ? 'ON' : 'OFF'} for Device: ${_deviceId.isEmpty ? 'testir' : _deviceId}'),
+          backgroundColor: value ? Colors.green : Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
   }
-
-
 
   bool _isConnectingMqtt = false;
 
   Future<void> _setupPersistentMqtt() async {
     if (_isConnectingMqtt) return;
-    if (_persistentMqttClient?.connectionStatus?.state == MqttConnectionState.connected) {
+    if (_persistentMqttClient?.connectionStatus?.state ==
+            MqttConnectionState.connected &&
+        _subscribedDeviceId == _deviceId) {
       return;
     }
+
+    // Disconnect existing client if we're switching devices
+    if (_persistentMqttClient?.connectionStatus?.state ==
+        MqttConnectionState.connected) {
+      _persistentMqttClient!.disconnect();
+    }
+
     _isConnectingMqtt = true;
 
     final String broker = AppConfig.mqttBroker;
@@ -413,115 +398,231 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     _persistentMqttClient!.port = 1883;
     _persistentMqttClient!.logging(on: false);
     _persistentMqttClient!.keepAlivePeriod = 60;
-    _persistentMqttClient!.onDisconnected = () => debugPrint('🔌 [MQTT Live] Disconnected');
+    _persistentMqttClient!.onDisconnected =
+        () => debugPrint('ðŸ”Œ [MQTT Live] Disconnected');
 
     final connMessage = MqttConnectMessage()
-        .withClientIdentifier('flutter_live_${DateTime.now().millisecondsSinceEpoch}')
+        .withClientIdentifier(
+            'flutter_live_${DateTime.now().millisecondsSinceEpoch}')
         .authenticateAs(username, password)
         .startClean();
     _persistentMqttClient!.connectionMessage = connMessage;
 
     try {
-      debugPrint('📡 [MQTT Live] Connecting...');
+      debugPrint('ðŸ“¡ [MQTT Live] Connecting...');
       await _persistentMqttClient!.connect();
-      if (_persistentMqttClient!.connectionStatus!.state == MqttConnectionState.connected) {
-        debugPrint('✅ [MQTT Live] Connected. Subscribing to $topic');
-        _persistentMqttClient!.subscribe(topic, MqttQos.atLeastOnce);
+      _isConnectingMqtt = false;
+      if (_persistentMqttClient!.connectionStatus!.state ==
+          MqttConnectionState.connected) {
+        final statusTopic = _getDeviceTopic('status');
+        debugPrint(
+            'âœ… [MQTT Live] Connected. Subscribing to root testir and $statusTopic');
+        _persistentMqttClient!.subscribe('testir', MqttQos.atLeastOnce);
+        _persistentMqttClient!.subscribe('testir/#', MqttQos.atLeastOnce);
+        _persistentMqttClient!.subscribe(statusTopic, MqttQos.atLeastOnce);
+        _subscribedDeviceId = _deviceId;
 
-        _persistentMqttClient!.updates!.listen((List<MqttReceivedMessage<MqttMessage?>>? c) {
+        _persistentMqttClient!.updates!
+            .listen((List<MqttReceivedMessage<MqttMessage?>>? c) {
           final recMess = c![0].payload as MqttPublishMessage;
-          final pt = MqttPublishPayload.bytesToStringAsString(recMess.payload.message);
-          debugPrint('📥 [MQTT Live] Message: $pt');
+          final pt =
+              MqttPublishPayload.bytesToStringAsString(recMess.payload.message);
+          debugPrint('ðŸ“¥ [MQTT Live] Status Message: $pt');
           _handleMqttTelemetry(pt);
         });
       }
     } catch (e) {
       _isConnectingMqtt = false;
-      debugPrint('❌ [MQTT Live] Error: $e');
-      // Retry after 5 seconds
-      Future.delayed(const Duration(seconds: 5), () => _setupPersistentMqtt());
+      debugPrint('? [MQTT Live] Connection Error: $e');
+      Future.delayed(const Duration(seconds: 10), () => _setupPersistentMqtt());
     }
   }
 
   void _handleMqttTelemetry(String payload) {
     debugPrint('📥 [MQTT DEBUG] Raw Payload: "$payload"');
-    if (payload.contains(':') && !payload.startsWith('{')) {
-      final parts = payload.split(':');
-      if (parts.length >= 2) {
-        final type = parts[1].trim().toUpperCase();
-        final value = parts.length >= 3 ? parts[2].trim() : '';
-        debugPrint('🔍 [MQTT DEBUG] Parsed Type: $type, Value: $value');
-        bool hasChanges = false;
+    bool hasChanges = false;
+    final String upperPayload = payload.trim().toUpperCase();
 
-        setState(() {
-          if (type == 'STATUS_TEMP') {
-            final val = double.tryParse(value);
-            if (val != null) {
-              _actualTemperature = val;
-              hasChanges = true;
-            }
-          } else if (type == 'STATUS_HUM') {
-            final val = double.tryParse(value);
-            if (val != null) {
-              _humidity = val.toInt();
-              hasChanges = true;
-            }
-          } else if (type == 'STATUS_ONLINE') {
-            // "prefix:STATUS_ONLINE" or "prefix:STATUS_ONLINE:ONLINE"
-            final val = value.isEmpty ? 'ONLINE' : value.toUpperCase();
-            _isOnline = (val == 'ONLINE' || val == '1' || val == 'ACTIVE' || val == 'ON' || val == 'TRUE');
-            hasChanges = true;
-          } else if (type == 'STATUS_OFFLINE') {
-            // "prefix:STATUS_OFFLINE" — device went offline
-            _isOnline = false;
-            hasChanges = true;
-          } else if (type == 'STATUS_ON' || type == 'STATUS_AC_ON') {
-            if (!_isPowerCommandLock) _isPowerOn = true;
-            hasChanges = true;
-          } else if (type == 'STATUS_OFF' || type == 'STATUS_AC_OFF') {
-            if (!_isPowerCommandLock) _isPowerOn = false;
-            hasChanges = true;
-          } else if (type == 'STATUS_SCH_ON') {
-            _scheduleOn = value;
-            hasChanges = true;
-          } else if (type == 'STATUS_SCH_OFF') {
-            _scheduleOff = value;
+    setState(() {
+      // 0. Handle JSON Payload
+      if (payload.trim().startsWith('{')) {
+        try {
+          final data = jsonDecode(payload);
+          final Map<String, dynamic> p = (data['data'] != null)
+              ? Map<String, dynamic>.from(data['data'])
+              : Map<String, dynamic>.from(data);
+
+          if (p['temp'] != null || p['current_temp'] != null) {
+            _actualTemperature =
+                (p['temp'] ?? p['current_temp'] as num).toDouble();
             hasChanges = true;
           }
-
-          if (hasChanges) {
-            _lastUpdateTime = DateTime.now();
-            _tempHistory.add(_ChartData(DateTime.now(), _actualTemperature));
-            if (_tempHistory.length > 20) _tempHistory.removeAt(0);
-            
-            _recentLogs.insert(0, {
-              'time': DateTime.now().toString().split('.').first.split(' ').last,
-              'temp': _actualTemperature.toStringAsFixed(1),
-              'hum': _humidity,
-              'ac': _isPowerOn ? 'ON' : 'OFF',
-            });
-            if (_recentLogs.length > 5) _recentLogs.removeLast();
-
-            // Save to local cache for instant loading next time
-            LocalCacheService.saveDeviceStatus(widget.systemShortId, {
-              'temp': _actualTemperature,
-              'hum': _humidity,
-              'power': _isPowerOn,
-              'online': _isOnline,
-            });
+          if (p['hum'] != null) {
+            _humidity = (p['hum'] as num).toInt();
+            hasChanges = true;
           }
+          if (p['ac'] != null || p['ACStatus'] != null) {
+            final acVal = (p['ac'] ?? p['ACStatus']).toString().toUpperCase();
+            if (!_isPowerCommandLock) {
+              _isPowerOn = (acVal == 'ON' || acVal == '1' || acVal == 'TRUE');
+            }
+            hasChanges = true;
+          }
+          if (p['online'] != null || p['status'] != null) {
+            final stVal = (p['online'] ?? p['status']).toString().toUpperCase();
+            _isOnline = (stVal == 'ONLINE' || stVal == 'TRUE' || stVal == '1');
+            hasChanges = true;
+          }
+          // Schedule parsing from JSON
+          if (p['schedule_on'] != null)
+            _scheduleOn1 = p['schedule_on'].toString();
+          if (p['schedule_off'] != null)
+            _scheduleOff1 = p['schedule_off'].toString();
+        } catch (e) {
+          debugPrint('❌ Error parsing MQTT JSON: $e');
+        }
+      }
+
+      // 1. Explicit Schedule & Lunch Parsing
+      if (upperPayload.contains('SCH_ON1')) {
+        _scheduleOn1 = _extractTime(payload);
+        hasChanges = true;
+      } else if (upperPayload.contains('SCH_ON2')) {
+        _scheduleOn2 = _extractTime(payload);
+        hasChanges = true;
+      } else if (upperPayload.contains('SCH_ON3')) {
+        _scheduleOn3 = _extractTime(payload);
+        hasChanges = true;
+      } else if (upperPayload.contains('SCH_OFF1')) {
+        _scheduleOff1 = _extractTime(payload);
+        hasChanges = true;
+      } else if (upperPayload.contains('SCH_OFF2')) {
+        _scheduleOff2 = _extractTime(payload);
+        hasChanges = true;
+      } else if (upperPayload.contains('SCH_OFF3')) {
+        _scheduleOff3 = _extractTime(payload);
+        hasChanges = true;
+      } else if (upperPayload.contains('LUNCH_ON')) {
+        _lunchOn = _extractTime(payload);
+        hasChanges = true;
+      } else if (upperPayload.contains('LUNCH_OFF')) {
+        _lunchOff = _extractTime(payload);
+        hasChanges = true;
+      }
+
+      // 2. Clearing Commands
+      if (upperPayload.contains('SCH_CLEAR_LUNCH')) {
+        // "This will clear all scedule"
+        _scheduleOn1 = '--:--';
+        _scheduleOff1 = '--:--';
+        _scheduleOn2 = '--:--';
+        _scheduleOff2 = '--:--';
+        _scheduleOn3 = '--:--';
+        _scheduleOff3 = '--:--';
+        _lunchOn = '--:--';
+        _lunchOff = '--:--';
+        hasChanges = true;
+      } else if (upperPayload.contains('SCH_CLEAR1')) {
+        _scheduleOn1 = '--:--';
+        _scheduleOff1 = '--:--';
+        hasChanges = true;
+      } else if (upperPayload.contains('SCH_CLEAR2')) {
+        _scheduleOn2 = '--:--';
+        _scheduleOff2 = '--:--';
+        hasChanges = true;
+      } else if (upperPayload == 'SCH_CLEAR' ||
+          upperPayload.endsWith(':SCH_CLEAR')) {
+        // "this one specific lunch clear"
+        _lunchOn = '--:--';
+        _lunchOff = '--:--';
+        hasChanges = true;
+      }
+
+      // 3. Status & Power Matches
+      if (upperPayload == 'ON_SUCCESS' ||
+          upperPayload == 'STATUS_ON' ||
+          upperPayload.contains('AC:ON')) {
+        if (!_isPowerCommandLock) _isPowerOn = true;
+        hasChanges = true;
+      } else if (upperPayload == 'OFF_SUCCESS' ||
+          upperPayload == 'STATUS_OFF' ||
+          upperPayload.contains('AC:OFF')) {
+        if (!_isPowerCommandLock) _isPowerOn = false;
+        hasChanges = true;
+      } else if (upperPayload == 'ONLINE' ||
+          upperPayload == 'ACTIVE' ||
+          upperPayload.contains('STATUS:ACTIVE')) {
+        _isOnline = true;
+        hasChanges = true;
+      } else if (upperPayload == 'OFFLINE' ||
+          upperPayload == 'INACTIVE' ||
+          upperPayload.contains('STATUS:INACTIVE')) {
+        _isOnline = false;
+        hasChanges = true;
+      } else if (upperPayload.startsWith('TEMP:')) {
+        final valStr = upperPayload.split(':').last.trim();
+        final val = double.tryParse(valStr);
+        if (val != null) {
+          _actualTemperature = val;
+          hasChanges = true;
+        }
+      } else if (upperPayload.startsWith('HUM:')) {
+        final valStr = upperPayload.split(':').last.trim();
+        final val = double.tryParse(valStr);
+        if (val != null) {
+          _humidity = val.toInt();
+          hasChanges = true;
+        }
+      }
+
+      if (hasChanges) {
+        _lastUpdateTime = DateTime.now();
+        _tempHistory.add(_ChartData(DateTime.now(), _actualTemperature));
+        if (_tempHistory.length > 20) _tempHistory.removeAt(0);
+
+        _recentLogs.insert(0, {
+          'time': DateTime.now().toString().split('.').first.split(' ').last,
+          'temp': _actualTemperature.toStringAsFixed(1),
+          'hum': _humidity,
+          'ac': _isPowerOn ? 'ON' : 'OFF',
+        });
+        if (_recentLogs.length > 5) _recentLogs.removeLast();
+
+        LocalCacheService.saveDeviceStatus(widget.systemShortId, {
+          'temp': _actualTemperature,
+          'hum': _humidity,
+          'power': _isPowerOn,
+          'online': _isOnline,
         });
       }
-    }
+    });
   }
 
-  Future<void> _publishMqttCommand(String message) async {
-    if (!_isOnline) {
-      _showOfflineWarning();
-      return;
+  String _extractTime(String payload) {
+    if (payload.contains(":")) {
+      final parts = payload.split(":");
+      String potentialTime = "";
+      if (parts.length >= 3) {
+        potentialTime =
+            '${parts[parts.length - 2].trim()}:${parts.last.trim()}';
+      } else {
+        potentialTime = parts.last.trim();
+      }
+      if (RegExp(r"^\d{1,2}:\d{2}$").hasMatch(potentialTime)) {
+        return potentialTime;
+      }
     }
+    return "--:--";
+  }
+
+  String _getDeviceTopic(String type) {
+    if (type == 'schedule') return 'testir/schedule';
+    return 'testir/Sustainbyte_testir/$type';
+  }
+
+  Future<void> _publishMqttCommand(String message, {String? topic}) async {
     final String broker = AppConfig.mqttBroker;
-    final String topic = AppConfig.mqttTopic;
+    final String targetTopic = topic ?? _getDeviceTopic('control');
     final String username = AppConfig.mqttUsername;
     final String password = AppConfig.mqttPassword;
 
@@ -533,27 +634,30 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     client.logging(on: false);
 
     final connMessage = MqttConnectMessage()
-        .withClientIdentifier('flutter_cmd_${DateTime.now().millisecondsSinceEpoch}')
+        .withClientIdentifier(
+            'flutter_cmd_${DateTime.now().millisecondsSinceEpoch}')
         .authenticateAs(username, password)
         .startClean();
     client.connectionMessage = connMessage;
 
     try {
-      debugPrint('📡 [MQTT CMD] Connecting to publish: $message');
+      debugPrint(
+          'ðŸ“¡ [MQTT CMD] Connecting to publish: $message to $targetTopic');
       await client.connect();
       if (client.connectionStatus!.state == MqttConnectionState.connected) {
         final builder = MqttClientPayloadBuilder();
         builder.addString(message);
-        client.publishMessage(topic, MqttQos.atLeastOnce, builder.payload!);
-        debugPrint('✅ [MQTT CMD] Published: $message');
-        
+        client.publishMessage(
+            targetTopic, MqttQos.atLeastOnce, builder.payload!);
+        debugPrint('âœ… [MQTT CMD] Published: $message to $targetTopic');
+
         // Optimistic UI update and lock
         setState(() {
           _lastManualCommandTime = DateTime.now();
           _isPowerCommandLock = true;
-          if (message.contains('STATUS_ON')) {
+          if (message == 'ON') {
             _isPowerOn = true;
-          } else if (message.contains('STATUS_OFF')) {
+          } else if (message == 'OFF') {
             _isPowerOn = false;
           }
         });
@@ -567,7 +671,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         client.disconnect();
       }
     } catch (e) {
-      debugPrint('❌ [MQTT CMD] Error: $e');
+      debugPrint('âŒ [MQTT CMD] Error: $e');
     }
   }
 
@@ -577,8 +681,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     final bucket = await AuthService.getBucket() ?? '';
     final token = await AuthService.getCookieHeader() ?? '';
 
-    final url =
-        '${AppConfig.provisionBaseUrl}/equipments/$equipmentId'
+    final url = '${AppConfig.provisionBaseUrl}/equipments/$equipmentId'
         '?companyId=$companyId&siteId=$siteId&bucket=$bucket';
 
     try {
@@ -597,9 +700,22 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         // Let's check the first equipment structure again
         final equipData = data['data'];
         if (equipData is List && equipData.isNotEmpty) {
-          return equipData[0]['imei'] ?? equipData[0]['shortId'] ?? '';
+          final first = equipData[0];
+          return (first['imei'] ??
+                      first['Imei'] ??
+                      first['shortId'] ??
+                      first['ShortId'] ??
+                      '')
+                  ?.toString() ??
+              '';
         } else if (equipData is Map) {
-          return equipData['imei'] ?? equipData['shortId'] ?? '';
+          return (equipData['imei'] ??
+                      equipData['Imei'] ??
+                      equipData['shortId'] ??
+                      equipData['ShortId'] ??
+                      '')
+                  ?.toString() ??
+              '';
         }
       }
     } catch (e) {
@@ -617,7 +733,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     final url =
         '${AppConfig.provisionBaseUrl}/mqtt/stream?companyid=$companyId&deviceId=$imei';
 
-    debugPrint('🌐 [HTTP Stream] Connecting to: $url');
+    debugPrint('ðŸŒ [HTTP Stream] Connecting to: $url');
 
     try {
       final client = http.Client();
@@ -635,30 +751,31 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             .transform(utf8.decoder)
             .transform(const LineSplitter()) // Handle line-by-line JSON
             .listen(
-              (line) {
-                if (line.trim().isEmpty) return;
-                debugPrint('📥 [HTTP Stream] Data: $line');
-                _parseAndMapData(line);
-              },
-              onError: (error) {
-                debugPrint('❌ [HTTP Stream] Error: $error');
-              },
-              onDone: () {
-                debugPrint('🔌 [HTTP Stream] Stream closed');
-                client.close();
-              },
-            );
+          (line) {
+            if (line.trim().isEmpty) return;
+            debugPrint('ðŸ“¥ [HTTP Stream] Data: $line');
+            _parseAndMapData(line);
+          },
+          onError: (error) {
+            debugPrint('âŒ [HTTP Stream] Error: $error');
+          },
+          onDone: () {
+            debugPrint('ðŸ”Œ [HTTP Stream] Stream closed');
+            client.close();
+          },
+        );
 
         // Background polling removed as per user request to stop continuous MQTT traffic.
         _pollTimer?.cancel();
       } else {
-        debugPrint('❌ [HTTP Stream] Connection failed: ${response.statusCode}');
+        debugPrint(
+            'âŒ [HTTP Stream] Connection failed: ${response.statusCode}');
         if (mounted) {
           setState(() => _isTelemetryLoading = false);
         }
       }
     } catch (e) {
-      debugPrint('❌ [HTTP Stream] Connection Exception: $e');
+      debugPrint('âŒ [HTTP Stream] Connection Exception: $e');
       if (mounted) {
         setState(() => _isTelemetryLoading = false);
       }
@@ -694,30 +811,85 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         // They are now handled via persistent MQTT subscription in _handleMqttTelemetry.
 
         bool newPowerOn = _isPowerOn;
-        if ((payload['ac'] != null || payload['ACStatus'] != null) && !_isPowerCommandLock) {
-          newPowerOn = (payload['ac'] ?? payload['ACStatus']).toString() == 'ON';
+        if ((payload['ac'] != null || payload['ACStatus'] != null) &&
+            !_isPowerCommandLock) {
+          newPowerOn =
+              (payload['ac'] ?? payload['ACStatus']).toString() == 'ON';
           if (newPowerOn != _isPowerOn) hasChanges = true;
         }
 
         bool newOnline = _isOnline;
-        if (payload['online'] != null || payload['status'] != null || payload['isActive'] != null) {
-          final val = (payload['online'] ?? payload['status'] ?? payload['isActive']).toString();
-          newOnline = val == 'true' || val == '1' || val == 'ONLINE' || val == 'Active' || val == 'ON';
+        if (payload['online'] != null ||
+            payload['status'] != null ||
+            payload['isActive'] != null) {
+          final val =
+              (payload['online'] ?? payload['status'] ?? payload['isActive'])
+                  .toString();
+          newOnline = val == 'true' ||
+              val == '1' ||
+              val == 'ONLINE' ||
+              val == 'Active' ||
+              val == 'ON';
           if (newOnline != _isOnline) hasChanges = true;
         }
 
-        String newSchOn = _scheduleOn;
-        if (payload['schedule_on'] != null || payload['scheduleOn'] != null) {
-          newSchOn = (payload['schedule_on'] ?? payload['scheduleOn'])
-              .toString();
-          if (newSchOn != _scheduleOn) hasChanges = true;
+        // Parsing multiple schedules
+        for (int i = 1; i <= 3; i++) {
+          String keyOn = 'schedule_on$i';
+          String keyOff = 'schedule_off$i';
+
+          if (payload[keyOn] != null) {
+            String val = payload[keyOn].toString();
+            if (i == 1) {
+              if (val != _scheduleOn1) {
+                _scheduleOn1 = val;
+                hasChanges = true;
+              }
+            }
+            if (i == 2) {
+              if (val != _scheduleOn2) {
+                _scheduleOn2 = val;
+                hasChanges = true;
+              }
+            }
+            if (i == 3) {
+              if (val != _scheduleOn3) {
+                _scheduleOn3 = val;
+                hasChanges = true;
+              }
+            }
+          }
+          if (payload[keyOff] != null) {
+            String val = payload[keyOff].toString();
+            if (i == 1) {
+              if (val != _scheduleOff1) {
+                _scheduleOff1 = val;
+                hasChanges = true;
+              }
+            }
+            if (i == 2) {
+              if (val != _scheduleOff2) {
+                _scheduleOff2 = val;
+                hasChanges = true;
+              }
+            }
+            if (i == 3) {
+              if (val != _scheduleOff3) {
+                _scheduleOff3 = val;
+                hasChanges = true;
+              }
+            }
+          }
         }
 
-        String newSchOff = _scheduleOff;
-        if (payload['schedule_off'] != null || payload['scheduleOff'] != null) {
-          newSchOff = (payload['schedule_off'] ?? payload['scheduleOff'])
-              .toString();
-          if (newSchOff != _scheduleOff) hasChanges = true;
+        // Legacy support/Fallback for single schedule key
+        if (payload['schedule_on'] != null && _scheduleOn1 == '--:--') {
+          _scheduleOn1 = payload['schedule_on'].toString();
+          hasChanges = true;
+        }
+        if (payload['schedule_off'] != null && _scheduleOff1 == '--:--') {
+          _scheduleOff1 = payload['schedule_off'].toString();
+          hasChanges = true;
         }
 
         String newLunchOn = _lunchOn;
@@ -728,8 +900,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
         String newLunchOff = _lunchOff;
         if (payload['lunch_off'] != null || payload['lunchOff'] != null) {
-          newLunchOff = (payload['lunch_off'] ?? payload['lunchOff'])
-              .toString();
+          newLunchOff =
+              (payload['lunch_off'] ?? payload['lunchOff']).toString();
           if (newLunchOff != _lunchOff) hasChanges = true;
         }
 
@@ -742,19 +914,19 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         if (mounted) {
           setState(() {
             _isTelemetryLoading = false;
-            
+
             if (hasChanges) {
               if (!_isPowerCommandLock) _isPowerOn = newPowerOn;
               _isOnline = newOnline;
-              _scheduleOn = newSchOn;
-              _scheduleOff = newSchOff;
+              // Schedule updates are handled inside the loop above
               _lunchOn = newLunchOn;
               _lunchOff = newLunchOff;
               _isAuto = newAuto;
               _lastUpdateTime = DateTime.now();
-              
+
               _recentLogs.insert(0, {
-                'time': payload!['time'] ?? DateTime.now().toString().split('.').first.split(' ').last,
+                'time': payload!['time'] ??
+                    DateTime.now().toString().split('.').first.split(' ').last,
                 'temp': _actualTemperature.toStringAsFixed(1),
                 'hum': _humidity,
                 'ac': _isPowerOn ? 'ON' : 'OFF',
@@ -775,9 +947,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: isDark
-          ? const Color(0xFF1B172E)
-          : const Color(0xFFF8FAFC),
+      backgroundColor:
+          isDark ? const Color(0xFF1B172E) : const Color(0xFFF8FAFC),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -800,16 +971,15 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                 fontWeight: FontWeight.w600,
               ),
             ),
-            if (_deviceId.isNotEmpty)
-              Text(
-                'ID: demo',
-                style: GoogleFonts.poppins(
-                  color: isDark ? Colors.white38 : Colors.black38,
-                  fontSize: 9,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 0.5,
-                ),
+            Text(
+              'ID: ${_deviceId.isEmpty ? 'testir' : _deviceId}',
+              style: GoogleFonts.poppins(
+                color: isDark ? Colors.white38 : Colors.black38,
+                fontSize: 9,
+                fontWeight: FontWeight.w500,
+                letterSpacing: 0.5,
               ),
+            ),
           ],
         ),
         actions: [
@@ -848,12 +1018,19 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                 _buildEquipmentTabs(isDark, colorScheme),
                 const SizedBox(height: 32), // Space between tabs and gauge
                 RepaintBoundary(
-                  child: _ThermostatGauge(
+                  child: _InteractiveThermostatGauge(
                     setTemp: _setTemperature,
                     actualTemp: _actualTemperature,
                     isDark: isDark,
                     colorScheme: colorScheme,
-                    onTap: () {}, // Removed MQTT request interaction
+                    onTempChanged: (val) {
+                      setState(() => _setTemperature = val);
+                      _publishMqttCommand('TEMP_CN:${val.toInt()}');
+                    },
+                    onClearTemp: () {
+                      setState(() => _setTemperature = 0.0);
+                      _publishMqttCommand('TEMP_CLEAR');
+                    },
                   ),
                 ),
                 const SizedBox(height: 32), // Space below gauge
@@ -1084,28 +1261,28 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   }
 
   Widget _tableHeader(String text, bool isDark) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 8),
-    child: Text(
-      text,
-      style: GoogleFonts.poppins(
-        color: Colors.white24,
-        fontSize: 9,
-        fontWeight: FontWeight.bold,
-      ),
-    ),
-  );
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text(
+          text,
+          style: GoogleFonts.poppins(
+            color: Colors.white24,
+            fontSize: 9,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      );
 
   Widget _tableCell(String text, bool isDark, {Color? color}) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 8),
-    child: Text(
-      text,
-      style: GoogleFonts.poppins(
-        color: color ?? (isDark ? Colors.white70 : Colors.black87),
-        fontSize: 11,
-        fontWeight: FontWeight.w500,
-      ),
-    ),
-  );
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text(
+          text,
+          style: GoogleFonts.poppins(
+            color: color ?? (isDark ? Colors.white70 : Colors.black87),
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      );
 
   void _showDataInsights(bool isDark) async {
     final companyId = await AuthService.getCompanyId() ?? '';
@@ -1118,11 +1295,11 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       orElse: () => {},
     );
 
-    debugPrint('🔍 DEBUGGING TRENDS NAVIGATION:');
-    debugPrint('🆔 Selected Equipment ID: $_selectedEquipmentId');
-    debugPrint('🏷️ Selected Short ID: $_selectedEquipmentShortId');
-    debugPrint('📱 Device ID (IMEI): $_deviceId');
-    debugPrint('📦 Full Equipment Data: $selectedData');
+    debugPrint('ðŸ” DEBUGGING TRENDS NAVIGATION:');
+    debugPrint('ðŸ†” Selected Equipment ID: $_selectedEquipmentId');
+    debugPrint('ðŸ·ï¸ Selected Short ID: $_selectedEquipmentShortId');
+    debugPrint('ðŸ“± Device ID (IMEI): $_deviceId');
+    debugPrint('ðŸ“¦ Full Equipment Data: $selectedData');
 
     if (!mounted) return;
 
@@ -1155,9 +1332,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       child: Row(
         children: [
           // First two equipments
-          ..._equipmentsData
-              .take(2)
-              .map(
+          ..._equipmentsData.take(2).map(
                 (e) => _buildTab(
                   e['name']?.toString() ?? 'N/A',
                   e['equipmentId']?.toString() == _selectedEquipmentId,
@@ -1276,8 +1451,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               : null,
           color: !isActive
               ? (isDark
-                    ? Colors.white.withOpacity(0.05)
-                    : Colors.grey.withOpacity(0.1))
+                  ? Colors.white.withOpacity(0.05)
+                  : Colors.grey.withOpacity(0.1))
               : null,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
@@ -1483,22 +1658,15 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Opacity(
-            opacity: _isOnline ? 1.0 : 0.4,
-            child: _controlButton(
-              icon: Icons.power_settings_new_rounded,
-              label: 'POWER',
-              isActive: _isPowerOn,
-              activeColor: const Color(0xFFEF4444),
-              onTap: () {
-                if (_isOnline) {
-                  _togglePower(!_isPowerOn);
-                } else {
-                  _showOfflineWarning();
-                }
-              },
-              isDark: isDark,
-            ),
+          _controlButton(
+            icon: Icons.power_settings_new_rounded,
+            label: 'POWER',
+            isActive: _isPowerOn,
+            activeColor: const Color(0xFFEF4444),
+            onTap: () {
+              _togglePower(!_isPowerOn);
+            },
+            isDark: isDark,
           ),
           _controlButton(
             icon: Icons.ac_unit_rounded,
@@ -1548,8 +1716,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               color: isActive
                   ? activeColor.withOpacity(0.15)
                   : (isDark
-                        ? Colors.white.withOpacity(0.05)
-                        : Colors.black.withOpacity(0.05)),
+                      ? Colors.white.withOpacity(0.05)
+                      : Colors.black.withOpacity(0.05)),
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
                 color: isActive
@@ -1600,208 +1768,63 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               // WIFI Toggle
-              Column(
-                children: [
-                  Container(
-                    width: 58,
-                    height: 58,
-                    decoration: BoxDecoration(
-                      color: _isOnline
-                          ? const Color(0xFF6CC042)
-                          : const Color(0xFFEF4444),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color:
-                              (_isOnline
-                                      ? const Color(0xFF6CC042)
-                                      : const Color(0xFFEF4444))
-                                  .withOpacity(0.4),
-                          blurRadius: 15,
-                          spreadRadius: 1,
-                        ),
-                      ],
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.2),
-                        width: 2,
+              _buildActionButton(
+                icon: _isOnline ? Icons.wifi_rounded : Icons.wifi_off_rounded,
+                label: 'WIFI',
+                isActive: true,
+                activeColor: _isOnline
+                    ? const Color(0xFF6CC042)
+                    : const Color(0xFFEF4444),
+                isDark: isDark,
+                onTap: () {
+                  if (!_isOnline) {
+                    debugPrint('🔄 [MQTT] User requested WiFi re-sync');
+                    _setupPersistentMqtt();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Re-syncing connection status...'),
+                        duration: Duration(seconds: 1),
+                        behavior: SnackBarBehavior.floating,
                       ),
-                    ),
-                    child: GestureDetector(
-                    onTap: null, // Removed MQTT request interaction
-                      child: Icon(
-                        _isOnline ? Icons.wifi_rounded : Icons.wifi_off_rounded,
-                        color: Colors.white,
-                        size: 28,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'WIFI',
-                    style: GoogleFonts.poppins(
-                      color: isDark ? Colors.white24 : Colors.black26,
-                      fontSize: 8,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ],
+                    );
+                  }
+                },
               ),
               const SizedBox(width: 20),
               // ON Button
-              Column(
-                children: [
-                  Opacity(
-                    opacity: _isOnline ? 1.0 : 0.4,
-                    child: GestureDetector(
-                      onTap: () {
-                        if (_isOnline) {
-                          _publishMqttCommand('${AppConfig.mqttPayloadPrefix}:STATUS_ON');
-                        } else {
-                          _showOfflineWarning();
-                        }
-                      },
-                      child: Container(
-                        width: 58,
-                        height: 58,
-                        decoration: BoxDecoration(
-                          color: _isPowerOn ? const Color(0xFF6CC042) : (isDark ? Colors.white10 : Colors.black12),
-                          shape: BoxShape.circle,
-                          boxShadow: _isPowerOn ? [
-                            BoxShadow(
-                              color: const Color(0xFF6CC042).withOpacity(0.4),
-                              blurRadius: 15,
-                              spreadRadius: 1,
-                            ),
-                          ] : null,
-                          border: Border.all(
-                            color: _isPowerOn ? Colors.white.withOpacity(0.2) : Colors.transparent,
-                            width: 2,
-                          ),
-                        ),
-                        child: Icon(
-                          Icons.power_settings_new_rounded,
-                          color: _isPowerOn ? Colors.white : (isDark ? Colors.white38 : Colors.black38),
-                          size: 28,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'ON',
-                    style: GoogleFonts.poppins(
-                      color: isDark ? Colors.white24 : Colors.black26,
-                      fontSize: 8,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ],
+              _buildActionButton(
+                icon: Icons.power_settings_new_rounded,
+                label: 'ON',
+                isActive: _isPowerOn,
+                activeColor: const Color(0xFF6CC042),
+                isDark: isDark,
+                onTap: () {
+                  _publishMqttCommand('ON');
+                },
               ),
               const SizedBox(width: 20),
               // OFF Button
-              Column(
-                children: [
-                  Opacity(
-                    opacity: _isOnline ? 1.0 : 0.4,
-                    child: GestureDetector(
-                      onTap: () {
-                        if (_isOnline) {
-                          _publishMqttCommand('${AppConfig.mqttPayloadPrefix}:STATUS_OFF');
-                        } else {
-                          _showOfflineWarning();
-                        }
-                      },
-                      child: Container(
-                        width: 58,
-                        height: 58,
-                        decoration: BoxDecoration(
-                          color: !_isPowerOn ? const Color(0xFFEF4444) : (isDark ? Colors.white10 : Colors.black12),
-                          shape: BoxShape.circle,
-                          boxShadow: !_isPowerOn ? [
-                            BoxShadow(
-                              color: const Color(0xFFEF4444).withOpacity(0.4),
-                              blurRadius: 15,
-                              spreadRadius: 1,
-                            ),
-                          ] : null,
-                          border: Border.all(
-                            color: !_isPowerOn ? Colors.white.withOpacity(0.2) : Colors.transparent,
-                            width: 2,
-                          ),
-                        ),
-                        child: Icon(
-                          Icons.power_off_rounded,
-                          color: !_isPowerOn ? Colors.white : (isDark ? Colors.white38 : Colors.black38),
-                          size: 28,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'OFF',
-                    style: GoogleFonts.poppins(
-                      color: isDark ? Colors.white24 : Colors.black26,
-                      fontSize: 8,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ],
+              _buildActionButton(
+                icon: Icons.power_off_rounded,
+                label: 'OFF',
+                isActive: !_isPowerOn,
+                activeColor: const Color(0xFFEF4444),
+                isDark: isDark,
+                onTap: () {
+                  _publishMqttCommand('OFF');
+                },
               ),
               const SizedBox(width: 20),
               // Schedule Control
-              Column(
-                children: [
-                  Opacity(
-                    opacity: _isOnline ? 1.0 : 0.4,
-                    child: GestureDetector(
-                      onTap: () {
-                        if (_isOnline) {
-                          _showSchedulePicker(isDark);
-                        } else {
-                          _showOfflineWarning();
-                        }
-                      },
-                      child: Container(
-                        width: 58,
-                        height: 58,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF8B5CF6),
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF8B5CF6).withOpacity(0.4),
-                              blurRadius: 15,
-                              spreadRadius: 1,
-                            ),
-                          ],
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.2),
-                            width: 2,
-                          ),
-                        ),
-                        child: const Icon(
-                          Icons.calendar_month_rounded,
-                          color: Colors.white,
-                          size: 28,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'SCHEDULE',
-                    style: GoogleFonts.poppins(
-                      color: isDark ? Colors.white24 : Colors.black26,
-                      fontSize: 8,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ],
+              _buildActionButton(
+                icon: Icons.calendar_month_rounded,
+                label: 'SCHEDULE',
+                isActive: true,
+                activeColor: const Color(0xFF8B5CF6),
+                isDark: isDark,
+                onTap: () {
+                  _showSchedulePicker(isDark);
+                },
               ),
             ],
           ),
@@ -1832,6 +1855,85 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     );
   }
 
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required bool isActive,
+    required Color activeColor,
+    required VoidCallback onTap,
+    required bool isDark,
+  }) {
+    final borderColor = isActive
+        ? activeColor.withOpacity(0.4)
+        : (isDark ? Colors.white12 : Colors.black12);
+    final iconColor = isActive
+        ? (isDark ? Colors.white : activeColor)
+        : (isDark ? Colors.white38 : Colors.black38);
+
+    return Column(
+      children: [
+        GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: isActive
+                  ? activeColor.withOpacity(isDark ? 0.15 : 0.1)
+                  : (isDark ? Colors.white.withOpacity(0.03) : Colors.white),
+              shape: BoxShape.circle,
+              boxShadow: isActive
+                  ? [
+                      BoxShadow(
+                        color: activeColor.withOpacity(0.25),
+                        blurRadius: 14,
+                        offset: const Offset(0, 4),
+                      ),
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.15),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ]
+                  : [
+                      if (!isDark)
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                    ],
+              border: Border.all(
+                color: borderColor,
+                width: 1.5,
+              ),
+            ),
+            child: Center(
+              child: Icon(
+                icon,
+                color: iconColor,
+                size: 26,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            color: isActive
+                ? (isDark ? Colors.white70 : activeColor)
+                : (isDark ? Colors.white24 : Colors.black26),
+            fontSize: 9,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.2,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildStatusCard(bool isDark) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1839,9 +1941,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         color: isDark ? const Color(0xFF26213A) : Colors.white,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: isDark
-              ? Colors.white.withOpacity(0.05)
-              : const Color(0xFFE2E8F0),
+          color:
+              isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFE2E8F0),
         ),
         boxShadow: [
           if (!isDark)
@@ -1867,18 +1968,17 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                   letterSpacing: 1.0,
                 ),
               ),
-              if (_deviceId.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Text(
-                    'ID: demo',
-                    style: GoogleFonts.poppins(
-                      color: isDark ? Colors.white10 : Colors.black12,
-                      fontSize: 7,
-                      fontWeight: FontWeight.w500,
-                    ),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  'ID: ${_deviceId.isEmpty ? 'testir' : _deviceId}',
+                  style: GoogleFonts.poppins(
+                    color: isDark ? Colors.white10 : Colors.black12,
+                    fontSize: 7,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
+              ),
               const SizedBox(height: 2),
               _isOnline
                   ? Text(
@@ -1925,15 +2025,13 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
   Widget _buildHumidityCard(bool isDark) {
     return Container(
-      child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF26213A) : Colors.white,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: isDark
-              ? Colors.white.withOpacity(0.05)
-              : const Color(0xFFE2E8F0),
+          color:
+              isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFE2E8F0),
         ),
         boxShadow: [
           if (!isDark)
@@ -1970,7 +2068,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                       strokeWidth: 3,
                       backgroundColor: Colors.white10,
                       valueColor: const AlwaysStoppedAnimation<Color>(
-                        Color(0xFFF59E0B), // Changed from blue to amber
+                        Color(0xFFF59E0B),
                       ),
                     ),
                     const Icon(
@@ -1994,22 +2092,18 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           ),
         ],
       ),
-    ));
+    );
   }
 
   Widget _buildScheduleSection(bool isDark) {
-    double start = _parseTimeToDouble(_scheduleOn);
-    double end = _parseTimeToDouble(_scheduleOff);
-
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF26213A) : Colors.white,
         borderRadius: BorderRadius.circular(28),
         border: Border.all(
-          color: isDark
-              ? Colors.white.withOpacity(0.05)
-              : const Color(0xFFE2E8F0),
+          color:
+              isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFE2E8F0),
         ),
         boxShadow: [
           if (!isDark)
@@ -2025,198 +2119,143 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         children: [
           Row(
             children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8B5CF6).withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.schedule_rounded,
+                    color: Color(0xFF8B5CF6), size: 18),
+              ),
+              const SizedBox(width: 12),
               Text(
                 'Daily Schedule',
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.outfit(
                   color: isDark ? Colors.white : Colors.black,
-                  fontSize: 15,
+                  fontSize: 16,
                   fontWeight: FontWeight.w600,
                 ),
               ),
               const Spacer(),
-              _isAuto ? _buildAutoBadge() : const SizedBox(),
+              if (_isAuto) _buildAutoBadge(),
             ],
           ),
-          const SizedBox(height: 24),
-          // Sun & Moon Timeline with Pins
+          const SizedBox(height: 20),
+          _buildScheduleItem('Schedule 1', _scheduleOn1, _scheduleOff1,
+              const Color(0xFF6CC042), isDark),
+          const SizedBox(height: 12),
+          _buildScheduleItem('Schedule 2', _scheduleOn2, _scheduleOff2,
+              const Color(0xFF3B82F6), isDark),
+          const SizedBox(height: 12),
+          _buildScheduleItem('Schedule 3', _scheduleOn3, _scheduleOff3,
+              const Color(0xFFF59E0B), isDark),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScheduleItem(
+      String label, String on, String off, Color color, bool isDark) {
+    final bool isActive = on != '--:--' && off != '--:--';
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withOpacity(0.03)
+            : Colors.grey.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isActive ? color.withOpacity(0.2) : Colors.transparent,
+        ),
+      ),
+      child: Row(
+        children: [
           Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _timePin('00', isDark),
-                  _timePin('06', isDark),
-                  _timePin('12', isDark),
-                  _timePin('18', isDark),
-                  _timePin('24', isDark),
-                ],
+              Text(
+                label.toUpperCase(),
+                style: GoogleFonts.outfit(
+                  color: isActive
+                      ? color
+                      : (isDark ? Colors.white24 : Colors.black26),
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
+                ),
               ),
               const SizedBox(height: 4),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final totalWidth = constraints.maxWidth;
-                  final left = (start / 24) * totalWidth;
-                  final width = ((end - start) / 24) * totalWidth;
-
-                  return Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      // Background Track with Day/Night Hint
-                      Container(
-                        height: 14,
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          gradient: isDark
-                              ? LinearGradient(
-                                  colors: [
-                                    Colors.white.withOpacity(0.05),
-                                    Colors.white.withOpacity(0.08),
-                                  ],
-                                )
-                              : LinearGradient(
-                                  colors: [
-                                    const Color(0xFFE0F2FE), // Light sky blue
-                                    const Color(0xFFF1F5F9), // Light grey
-                                  ],
-                                ),
-                          borderRadius: BorderRadius.circular(7),
-                        ),
-                      ),
-                      // Contextual Icons
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Icon(
-                              Icons.nights_stay_rounded,
-                              color: isDark
-                                  ? Colors.white10
-                                  : Colors.black.withOpacity(0.2),
-                              size: 10,
-                            ),
-                            Icon(
-                              Icons.wb_sunny_rounded,
-                              color: isDark
-                                  ? Colors.white10
-                                  : Colors.orange.withOpacity(0.4),
-                              size: 10,
-                            ),
-                            Icon(
-                              Icons.nights_stay_rounded,
-                              color: isDark
-                                  ? Colors.white10
-                                  : Colors.black.withOpacity(0.2),
-                              size: 10,
-                            ),
-                          ],
-                        ),
-                      ),
-                      // Active Schedule Range
-                      Positioned(
-                        left: left,
-                        width: width.clamp(0, totalWidth - left),
-                        child: Container(
-                          height: 14,
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFF6CC042), Color(0xFF86EFAC)],
-                            ),
-                            borderRadius: BorderRadius.circular(7),
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF6CC042).withOpacity(0.3),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-                },
+              Text(
+                isActive ? 'Running' : 'Not Set',
+                style: GoogleFonts.outfit(
+                  color: isDark ? Colors.white38 : Colors.black38,
+                  fontSize: 12,
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _timeSimpleLabel('FROM', _scheduleOn, isDark),
-              _timeSimpleLabel('TO', _scheduleOff, isDark),
-            ],
+          const Spacer(),
+          _timeChip('ON', on, isActive ? color : null, isDark),
+          const SizedBox(width: 8),
+          _timeChip('OFF', off, isActive ? Colors.redAccent : null, isDark),
+        ],
+      ),
+    );
+  }
+
+  Widget _timeChip(String label, String time, Color? activeColor, bool isDark) {
+    final isActive = activeColor != null;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isActive
+            ? activeColor.withOpacity(0.1)
+            : (isDark
+                ? Colors.white.withOpacity(0.05)
+                : Colors.grey.withOpacity(0.1)),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isActive ? activeColor.withOpacity(0.3) : Colors.transparent,
+        ),
+      ),
+      child: Column(
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.outfit(
+              color: isActive
+                  ? activeColor
+                  : (isDark ? Colors.white24 : Colors.black26),
+              fontSize: 8,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Text(
+            time,
+            style: GoogleFonts.outfit(
+              color: isActive
+                  ? (isDark ? Colors.white : Colors.black87)
+                  : (isDark ? Colors.white12 : Colors.black12),
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
     );
   }
 
-  double _parseTimeToDouble(String timeStr) {
-    if (timeStr == '--:--' || timeStr.isEmpty) return 0.0;
-    try {
-      final parts = timeStr.split(':');
-      if (parts.length != 2) return 0.0;
-      final hr = double.tryParse(parts[0]) ?? 0.0;
-      final min = double.tryParse(parts[1]) ?? 0.0;
-      return hr + (min / 60.0);
-    } catch (e) {
-      return 0.0;
-    }
-  }
-
-  Widget _timeSimpleLabel(String label, String time, bool isDark) {
-    return Column(
-      crossAxisAlignment: label == 'FROM'
-          ? CrossAxisAlignment.start
-          : CrossAxisAlignment.end,
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.poppins(
-            color: isDark ? Colors.white24 : Colors.black45,
-            fontSize: 8,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        Text(
-          time,
-          style: GoogleFonts.poppins(
-            color: isDark ? Colors.white : Colors.black,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _timePin(String time, bool isDark) {
-    return Text(
-      time,
-      style: GoogleFonts.poppins(
-        color: isDark
-            ? Colors.white.withOpacity(0.15)
-            : Colors.black.withOpacity(0.4),
-        fontSize: 8,
-        fontWeight: FontWeight.bold,
-      ),
-    );
-  }
-
   Widget _buildLunchSection(bool isDark) {
-    double start = _parseTimeToDouble(_lunchOn);
-    double end = _parseTimeToDouble(_lunchOff);
-
+    final bool isActive = _lunchOn != '--:--' && _lunchOff != '--:--';
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF26213A) : Colors.white,
         borderRadius: BorderRadius.circular(28),
         border: Border.all(
-          color: isDark
-              ? Colors.white.withOpacity(0.05)
-              : const Color(0xFFE2E8F0),
+          color:
+              isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFE2E8F0),
         ),
         boxShadow: [
           if (!isDark)
@@ -2227,91 +2266,73 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             ),
         ],
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Column(
         children: [
-          // Vertical Indicator
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final totalHeight = 100.0;
-              final top = (start / 24) * totalHeight;
-              final height = ((end - start) / 24) * totalHeight;
-
-              return Container(
-                width: 12,
-                height: totalHeight,
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: isDark
-                      ? Colors.white10
-                      : Colors.black.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(6),
+                  color: Colors.orange.withOpacity(0.1),
+                  shape: BoxShape.circle,
                 ),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Positioned(
-                      top: top,
-                      height: height.clamp(
-                        4.0,
-                        totalHeight,
-                      ), // Minimum 4px for visibility
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.orangeAccent,
-                          borderRadius: BorderRadius.circular(6),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.orangeAccent.withOpacity(0.4),
-                              blurRadius: 10,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
+                child: const Icon(Icons.restaurant_rounded,
+                    color: Colors.orange, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Lunch Schedule',
+                style: GoogleFonts.outfit(
+                  color: isDark ? Colors.white : Colors.black,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
                 ),
-              );
-            },
-          ),
-          const SizedBox(width: 24),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Lunch Break',
-                      style: GoogleFonts.poppins(
-                        color: isDark ? Colors.white : Colors.black,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
+              ),
+              const Spacer(),
+              if (isActive)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '1H DURATION',
+                    style: GoogleFonts.outfit(
+                      color: Colors.orange,
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
                     ),
-                    Icon(
-                      Icons.restaurant_rounded,
-                      color: Colors.orangeAccent.withOpacity(0.5),
-                      size: 18,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                _lunchTimeRow('START', _lunchOn),
-                const SizedBox(height: 8),
-                _lunchTimeRow('END', _lunchOff),
-                const SizedBox(height: 12),
-                Text(
-                  '1 HOUR DURATION',
-                  style: GoogleFonts.poppins(
-                    color: Colors.orangeAccent,
-                    fontSize: 8,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1,
                   ),
                 ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withOpacity(0.03)
+                  : Colors.grey.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: isActive
+                    ? Colors.orange.withOpacity(0.2)
+                    : Colors.transparent,
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _lunchTimeItem('BREAK START', _lunchOn, isDark),
+                Container(
+                    width: 1,
+                    height: 30,
+                    color: isDark
+                        ? Colors.white.withAlpha(26)
+                        : Colors.black.withAlpha(26)),
+                _lunchTimeItem('BREAK END', _lunchOff, isDark),
               ],
             ),
           ),
@@ -2320,50 +2341,27 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     );
   }
 
-  Widget _lunchTimeRow(String label, String time) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget _lunchTimeItem(String label, String time, bool isDark) {
+    final bool isSet = time != '--:--';
+    return Column(
       children: [
         Text(
           label,
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.outfit(
             color: isDark ? Colors.white24 : Colors.black26,
             fontSize: 9,
             fontWeight: FontWeight.bold,
+            letterSpacing: 1,
           ),
         ),
+        const SizedBox(height: 4),
         Text(
           time,
-          style: GoogleFonts.poppins(
-            color: isDark ? Colors.white : Colors.black,
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _lunchSimpleLabel(String label, String time, bool isDark) {
-    return Column(
-      crossAxisAlignment: label == 'START'
-          ? CrossAxisAlignment.start
-          : CrossAxisAlignment.end,
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.poppins(
-            color: isDark ? Colors.white24 : Colors.black26,
-            fontSize: 8,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        Text(
-          time,
-          style: GoogleFonts.poppins(
-            color: isDark ? Colors.white : Colors.black,
-            fontSize: 16,
+          style: GoogleFonts.outfit(
+            color: isSet
+                ? (isDark ? Colors.white : Colors.black87)
+                : (isDark ? Colors.white12 : Colors.black12),
+            fontSize: 20,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -2380,157 +2378,10 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       ),
       child: Text(
         'AUTO',
-        style: GoogleFonts.poppins(
+        style: GoogleFonts.outfit(
           color: const Color(0xFF6CC042),
           fontSize: 9,
           fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTimeTimeline(
-    bool isDark,
-    String onTime,
-    String offTime,
-    String label, {
-    Color color = const Color(0xFF6CC042),
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            _timeLabel(onTime, 'START', color),
-            _timeLabel(offTime, 'END', Colors.redAccent),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Stack(
-          children: [
-            Container(
-              height: 6,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(3),
-              ),
-            ),
-            Container(
-              margin: const EdgeInsets.only(
-                left: 40,
-                right: 80,
-              ), // Mock active range
-              height: 6,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [color, color.withOpacity(0.5)],
-                ),
-                borderRadius: BorderRadius.circular(3),
-                boxShadow: [
-                  BoxShadow(
-                    color: color.withOpacity(0.3),
-                    blurRadius: 4,
-                    spreadRadius: 1,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          label,
-          style: GoogleFonts.poppins(
-            color: isDark ? Colors.white24 : Colors.black45,
-            fontSize: 8,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _timeLabel(String time, String type, Color color) {
-    return Column(
-      crossAxisAlignment: type == 'START'
-          ? CrossAxisAlignment.start
-          : CrossAxisAlignment.end,
-      children: [
-        Text(
-          type,
-          style: GoogleFonts.poppins(
-            color: Colors.white24,
-            fontSize: 8,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        Text(
-          time,
-          style: GoogleFonts.poppins(
-            color: Colors.white,
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildTimePill(
-    String label,
-    String hr,
-    String min,
-    Color color,
-    bool isDark,
-  ) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.1)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            label,
-            style: GoogleFonts.poppins(
-              color: color,
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            '$hr:$min',
-            style: GoogleFonts.poppins(
-              color: isDark ? Colors.white : const Color(0xFF1B172E),
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _smallTimeBox(String hr, String min, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        '$hr:$min',
-        style: GoogleFonts.poppins(
-          color: color,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -2541,151 +2392,75 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       context: context,
       builder: (context) => _ScheduleControlDialog(
         isDark: isDark,
-        initialOn: _scheduleOn,
-        initialOff: _scheduleOff,
-        onCommand: (type, time) => _publishMqttSchedule(type, time),
-        onClear: () => _publishMqttSchedule('SCH_CLEAR', null),
+        schedules: [
+          {'on': _scheduleOn1, 'off': _scheduleOff1},
+          {'on': _scheduleOn2, 'off': _scheduleOff2},
+          {'on': _scheduleOn3, 'off': _scheduleOff3},
+        ],
+        lunch: {'on': _lunchOn, 'off': _lunchOff},
+        onCommand: (type, index, time) =>
+            _publishMqttSchedule(type, index, time),
       ),
     );
   }
 
-  Future<void> _publishMqttSchedule(String type, String? time) async {
-    // 1. Optimistic UI Update
+  Future<void> _publishMqttSchedule(
+      String type, int index, String? time) async {
     if (mounted) {
       setState(() {
-        if (type == 'SCH_ON' && time != null) _scheduleOn = time;
-        if (type == 'SCH_OFF' && time != null) _scheduleOff = time;
+        if (type == 'SCH_ON') {
+          if (index == 1) _scheduleOn1 = time!;
+          if (index == 2) _scheduleOn2 = time!;
+          if (index == 3) _scheduleOn3 = time!;
+        }
+        if (type == 'SCH_OFF') {
+          if (index == 1) _scheduleOff1 = time!;
+          if (index == 2) _scheduleOff2 = time!;
+          if (index == 3) _scheduleOff3 = time!;
+        }
+        if (type == 'LUNCH_ON') _lunchOn = time!;
+        if (type == 'LUNCH_OFF') _lunchOff = time!;
         if (type == 'SCH_CLEAR') {
-          _scheduleOn = '--:--';
-          _scheduleOff = '--:--';
+          if (index == 1) {
+            _scheduleOn1 = '--:--';
+            _scheduleOff1 = '--:--';
+          }
+          if (index == 2) {
+            _scheduleOn2 = '--:--';
+            _scheduleOff2 = '--:--';
+          }
+          if (index == 3) {
+            _scheduleOn3 = '--:--';
+            _scheduleOff3 = '--:--';
+          }
+          if (index == 4) {
+            _lunchOn = '--:--';
+            _lunchOff = '--:--';
+          }
+        }
+        if (type == 'SCH_CLEAR_ALL') {
+          _scheduleOn1 = '--:--';
+          _scheduleOff1 = '--:--';
+          _scheduleOn2 = '--:--';
+          _scheduleOff2 = '--:--';
+          _scheduleOn3 = '--:--';
+          _scheduleOff3 = '--:--';
+          _lunchOn = '--:--';
+          _lunchOff = '--:--';
         }
       });
     }
 
-    // 2. Send MQTT Command
-    String mqttType = '';
-    if (type == 'SCH_ON') mqttType = 'STATUS_SCH_ON';
-    else if (type == 'SCH_OFF') mqttType = 'STATUS_SCH_OFF';
-    else if (type == 'SCH_CLEAR') mqttType = 'STATUS_SCH_CLEAR';
-
-    if (mqttType.isNotEmpty) {
-      _publishMqttCommand('${AppConfig.mqttPayloadPrefix}:$mqttType:${time ?? ''}');
+    String payloadStr = '';
+    if (type == 'SCH_CLEAR_ALL') {
+      payloadStr = 'SCH_CLEAR_LUNCH';
+    } else if (type == 'SCH_CLEAR') {
+      payloadStr = index <= 3 ? 'SCH_CLEAR$index' : 'SCH_CLEAR';
+    } else {
+      payloadStr = '${type}${index <= 3 ? index : ''}:$time';
     }
 
-    // (Optional) Legacy API calls follow...
-    final companyId = await AuthService.getCompanyId() ?? '';
-    final token = await AuthService.getCookieHeader() ?? '';
-
-    // 1. Fetch MQTT Configs
-    final configUrl =
-        '${AppConfig.provisionBaseUrl}/companies/$companyId/mqtt-configs';
-    Map<String, dynamic>? selectedConfig;
-
-    try {
-      final response = await http.get(
-        Uri.parse(configUrl),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final List<dynamic> configs = data['data'] ?? [];
-
-        // Find config with type 'ac_compressor'
-        selectedConfig = configs.firstWhere(
-          (c) => c['type'] == 'ac_compressor',
-          orElse: () => null,
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ Error fetching MQTT configs: $e');
-    }
-
-    if (selectedConfig == null) {
-      debugPrint('⚠️ No AC Compressor MQTT config found for Schedule.');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Error: No valid MQTT configuration found for scheduling.',
-            ),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
-      return;
-    }
-
-    final String broker = AppConfig.mqttBroker;
-    final String topic = AppConfig.mqttTopic;
-    final String username = AppConfig.mqttUsername;
-    final String password = AppConfig.mqttPassword;
-
-    final client = MqttServerClient(
-      broker,
-      'flutter_sch_${DateTime.now().millisecondsSinceEpoch}',
-    );
-    client.port = 1883;
-    client.logging(on: false);
-    client.keepAlivePeriod = 20;
-
-    final connMessage = MqttConnectMessage()
-        .withClientIdentifier(
-          'flutter_sch_${DateTime.now().millisecondsSinceEpoch}',
-        )
-        .authenticateAs(username, password)
-        .startClean()
-        .withWillQos(MqttQos.atLeastOnce);
-    client.connectionMessage = connMessage;
-
-    try {
-      debugPrint('📡 MQTT [SCH]: Connecting to $broker as $username...');
-      await client.connect();
-      if (client.connectionStatus!.state == MqttConnectionState.connected) {
-        String payload = ':$type';
-        if (time != null) payload += ':$time';
-
-        final builder = MqttClientPayloadBuilder();
-        builder.addString(payload);
-
-        // Detailed logging for verification
-        debugPrint('--------------------------------------------------');
-        debugPrint('🕒 [MQTT SCHEDULE SENT]');
-        debugPrint('📍 Topic:    $topic');
-        debugPrint('📦 Payload:  $payload');
-        debugPrint(
-          '📝 Equivalent: mosquitto_pub -h "$broker" -p 1883 -u "$username" -P "$password" -t "$topic" -m "$payload"',
-        );
-        debugPrint('--------------------------------------------------');
-
-        client.publishMessage(topic, MqttQos.atLeastOnce, builder.payload!);
-
-        client.disconnect();
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Schedule Sent to Device: demo'),
-              backgroundColor: const Color(0xFF6CC042),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ MQTT [SCH] Error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('MQTT Error: $e'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
-    }
+    _publishMqttCommand(payloadStr, topic: 'testir/schedule');
   }
 
   void _showOfflineWarning() {
@@ -2697,10 +2472,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           children: [
             const Icon(Icons.wifi_off_rounded, color: Colors.white),
             const SizedBox(width: 12),
-            Text(
-              'Device is Offline',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-            ),
+            Text('Device is Offline',
+                style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
           ],
         ),
         backgroundColor: Colors.redAccent,
@@ -2712,379 +2485,10 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   }
 }
 
-class _ThermostatGauge extends StatelessWidget {
-  final double setTemp;
-  final double actualTemp;
-  final bool isDark;
-  final ColorScheme colorScheme;
-  final VoidCallback onTap;
-
-  const _ThermostatGauge({
-    required this.setTemp,
-    required this.actualTemp,
-    required this.isDark,
-    required this.colorScheme,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 300,
-          height: 300,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            boxShadow: [
-              if (isDark)
-                BoxShadow(
-                  color: _getColorForTemp(actualTemp).withOpacity(0.15),
-                  blurRadius: 40,
-                  spreadRadius: 5,
-                ),
-            ],
-          ),
-          child: RepaintBoundary(
-            child: CustomPaint(
-              painter: _ThermostatPainter(
-                setTemp: setTemp,
-                actualTemp: actualTemp,
-                isDark: isDark,
-                colorScheme: colorScheme,
-              ),
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      'SET TEMP',
-                      style: GoogleFonts.poppins(
-                        color: (isDark ? Colors.white : colorScheme.primary)
-                            .withOpacity(0.4),
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${setTemp.toInt()}°C',
-                      style: GoogleFonts.poppins(
-                        color: isDark ? Colors.white : const Color(0xFF1B172E),
-                        fontSize: 54,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'ACTUAL   ${actualTemp.toStringAsFixed(1)}°C',
-                      style: GoogleFonts.poppins(
-                        color: (isDark ? Colors.white : colorScheme.primary)
-                            .withOpacity(0.5),
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Color _getColorForTemp(double temp) {
-    if (temp < 20) return const Color(0xFFEF4444);
-    if (temp < 22) return const Color(0xFFF59E0B);
-    if (temp < 26) return const Color(0xFF10B981);
-    if (temp < 28) return const Color(0xFFF59E0B);
-    return const Color(0xFFEF4444);
-  }
-}
-
-class _ThermostatPainter extends CustomPainter {
-  final double setTemp;
-  final double actualTemp;
-  final bool isDark;
-  final ColorScheme colorScheme;
-
-  _ThermostatPainter({
-    required this.setTemp,
-    required this.actualTemp,
-    required this.isDark,
-    required this.colorScheme,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2;
-
-    const startAngle = math.pi * 0.75;
-    const sweepAngle = math.pi * 1.5;
-
-    double tempToAngle(double temp) => (temp / 40) * sweepAngle + startAngle;
-
-    // 1. Color Ranges Background (Main Track)
-    final trackRect = Rect.fromCircle(center: center, radius: radius - 15);
-    final trackPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 12
-      ..strokeCap = StrokeCap.round;
-
-    void drawTrackRange(double start, double end, Color color) {
-      final sAngle = tempToAngle(start);
-      final swAngle = ((end - start) / 40) * sweepAngle;
-      trackPaint.color = color.withOpacity(0.15);
-      canvas.drawArc(trackRect, sAngle, swAngle, false, trackPaint);
-    }
-
-    drawTrackRange(0, 20, const Color(0xFFEF4444));
-    drawTrackRange(20, 22, const Color(0xFFFBBF24));
-    drawTrackRange(22, 26, const Color(0xFF6CC042));
-    drawTrackRange(26, 28, const Color(0xFFFBBF24));
-    drawTrackRange(28, 40, const Color(0xFFEF4444));
-
-    // 2. Full Background Track (The "missing" circle)
-    final fullTrackPaint = Paint()
-      ..color = isDark
-          ? Colors.white.withOpacity(0.03)
-          : Colors.black.withOpacity(0.03)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 12;
-    canvas.drawCircle(center, radius - 15, fullTrackPaint);
-
-    // 2.5 Range Boundary Dots (Small color indicators)
-    final dotPoints = [20.0, 22.0, 26.0, 28.0];
-    for (final p in dotPoints) {
-      final angle = tempToAngle(p);
-      final dotPos = Offset(
-        center.dx + (radius - 15) * math.cos(angle),
-        center.dy + (radius - 15) * math.sin(angle),
-      );
-      final dotColor = _getColorForTemp(p);
-
-      // Shadow for dot
-      canvas.drawCircle(
-        dotPos,
-        4,
-        Paint()..color = Colors.black.withOpacity(0.5),
-      );
-      // Colored dot
-      canvas.drawCircle(dotPos, 3, Paint()..color = dotColor);
-    }
-
-    // 2.6 Partial Base Track (270 degrees)
-    final basePaint = Paint()
-      ..color = isDark
-          ? Colors.white.withOpacity(0.05)
-          : colorScheme.primary.withOpacity(0.1)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 12
-      ..strokeCap = StrokeCap.round;
-    canvas.drawArc(trackRect, startAngle, sweepAngle, false, basePaint);
-
-    // 3. Active Arc with Glow (Representing Actual Temp now)
-    final activeColor = _getColorForTemp(actualTemp);
-    final activePaint = Paint()
-      ..color = activeColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 12
-      ..strokeCap = StrokeCap.round;
-
-    final glowPaint = Paint()
-      ..color = activeColor.withOpacity(0.3)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 20
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8)
-      ..strokeCap = StrokeCap.round;
-
-    final currentSweep = (actualTemp / 40) * sweepAngle;
-    canvas.drawArc(trackRect, startAngle, currentSweep, false, glowPaint);
-    canvas.drawArc(trackRect, startAngle, currentSweep, false, activePaint);
-
-    // 4. Handle (representing the indicator point)
-    final handleAngle = currentSweep + startAngle;
-    final handlePos = Offset(
-      center.dx + (radius - 15) * math.cos(handleAngle),
-      center.dy + (radius - 15) * math.sin(handleAngle),
-    );
-
-    canvas.drawCircle(
-      handlePos,
-      8,
-      Paint()
-        ..color = Colors.white
-        ..style = PaintingStyle.fill
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
-    );
-    canvas.drawCircle(handlePos, 6, Paint()..color = Colors.white);
-    canvas.drawCircle(handlePos, 4, Paint()..color = activeColor);
-
-    // 5. Radial Ticks (Reduced count for performance)
-    for (int i = 0; i <= 40; i++) {
-      final angle = (i / 40) * sweepAngle + startAngle;
-      final tickTemp = (i / 40) * 40;
-      final isActive = tickTemp <= actualTemp;
-      final tickPaint = Paint()
-        ..color = isActive
-            ? activeColor
-            : (isDark
-                  ? Colors.white.withOpacity(0.08)
-                  : Colors.black.withOpacity(0.08))
-        ..strokeWidth = 1.0;
-      final innerR = radius - 45;
-      final outerR = radius - 30;
-      canvas.drawLine(
-        Offset(
-          center.dx + innerR * math.cos(angle),
-          center.dy + innerR * math.sin(angle),
-        ),
-        Offset(
-          center.dx + outerR * math.cos(angle),
-          center.dy + outerR * math.sin(angle),
-        ),
-        tickPaint,
-      );
-    }
-
-    // 6. Labels for Ranges
-    final labelPoints = [0, 20, 22, 26, 28, 40];
-    for (final p in labelPoints) {
-      final angle = tempToAngle(p.toDouble());
-      final labelR = radius + 15;
-      final textPos = Offset(
-        center.dx + labelR * math.cos(angle),
-        center.dy + labelR * math.sin(angle),
-      );
-
-      final textSpan = TextSpan(
-        text: '$p',
-        style: GoogleFonts.poppins(
-          color: Colors.white60,
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-        ),
-      );
-      final textPainter = TextPainter(
-        text: textSpan,
-        textDirection: TextDirection.ltr,
-      )..layout();
-      textPainter.paint(
-        canvas,
-        Offset(
-          textPos.dx - textPainter.width / 2,
-          textPos.dy - textPainter.height / 2,
-        ),
-      );
-    }
-  }
-
-  Color _getColorForTemp(double temp) {
-    if (temp < 20) return const Color(0xFFEF4444);
-    if (temp < 22) return const Color(0xFFF59E0B);
-    if (temp < 26) return const Color(0xFF10B981);
-    if (temp < 28) return const Color(0xFFF59E0B);
-    return const Color(0xFFEF4444);
-  }
-
-  @override
-  bool shouldRepaint(_ThermostatPainter oldDelegate) =>
-      oldDelegate.setTemp != setTemp || oldDelegate.actualTemp != actualTemp;
-}
-
 class _ChartData {
   _ChartData(this.time, this.temp);
   final DateTime time;
   final double temp;
-}
-
-class _ScheduleArcPainter extends CustomPainter {
-  final double startHr;
-  final double endHr;
-  final bool isDark;
-
-  _ScheduleArcPainter({
-    required this.startHr,
-    required this.endHr,
-    required this.isDark,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height);
-    final radius = size.width / 2;
-    final rect = Rect.fromCircle(center: center, radius: radius);
-
-    const fullStart = math.pi;
-    const fullSweep = math.pi;
-
-    // 1. Background Arc (24h)
-    final bgPaint = Paint()
-      ..color = Colors.white.withOpacity(0.05)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 12
-      ..strokeCap = StrokeCap.round;
-    canvas.drawArc(rect, fullStart, fullSweep, false, bgPaint);
-
-    // 2. Active Range Arc
-    final activeStart = fullStart + (startHr / 24) * fullSweep;
-    final activeSweep = ((endHr - startHr) / 24) * fullSweep;
-
-    final activePaint = Paint()
-      ..color = const Color(0xFF6CC042)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 12
-      ..strokeCap = StrokeCap.round;
-
-    final glowPaint = Paint()
-      ..color = const Color(0xFF6CC042).withOpacity(0.2)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 20
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8)
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawArc(rect, activeStart, activeSweep, false, glowPaint);
-    canvas.drawArc(rect, activeStart, activeSweep, false, activePaint);
-
-    // 3. Labels
-    _drawLabel(canvas, '00', center, radius + 15, fullStart);
-    _drawLabel(canvas, '12', center, radius + 15, fullStart + fullSweep / 2);
-    _drawLabel(canvas, '24', center, radius + 15, fullStart + fullSweep);
-  }
-
-  void _drawLabel(
-    Canvas canvas,
-    String text,
-    Offset center,
-    double r,
-    double angle,
-  ) {
-    final pos = Offset(
-      center.dx + r * math.cos(angle),
-      center.dy + r * math.sin(angle),
-    );
-    final tp = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: GoogleFonts.poppins(
-          color: Colors.white24,
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    tp.paint(canvas, Offset(pos.dx - tp.width / 2, pos.dy - tp.height / 2));
-  }
-
-  @override
-  bool shouldRepaint(_ScheduleArcPainter old) =>
-      old.startHr != startHr || old.endHr != endHr;
 }
 
 // Background parser for chart data to prevent UI thread blocking
@@ -3172,7 +2576,7 @@ class _TrendsPageState extends State<_TrendsPage>
   void initState() {
     super.initState();
     debugPrint(
-      '📊 TRENDS OPENED WITH: ID=${widget.equipmentId}, ShortId=${widget.equipmentShortId}, TypeId=${widget.equipmentTypeId}',
+      'ðŸ“Š TRENDS OPENED WITH: ID=${widget.equipmentId}, ShortId=${widget.equipmentShortId}, TypeId=${widget.equipmentTypeId}',
     );
     _fetchParameters();
   }
@@ -3183,16 +2587,16 @@ class _TrendsPageState extends State<_TrendsPage>
         '${AppConfig.provisionBaseUrl}/systems/parameters/${widget.equipmentTypeId}'
         '?companyId=${widget.companyId}&siteId=${widget.siteId}&bucket=${widget.bucket}';
 
-    debugPrint('📊 FETCH PARAMETERS URL: $url');
-    debugPrint('🔑 TOKEN STATUS: ${token.isNotEmpty ? "PRESET" : "MISSING"}');
+    debugPrint('ðŸ“Š FETCH PARAMETERS URL: $url');
+    debugPrint('ðŸ”‘ TOKEN STATUS: ${token.isNotEmpty ? "PRESET" : "MISSING"}');
 
     try {
       final response = await http.get(
         Uri.parse(url),
         headers: {'Authorization': 'Bearer $token'},
       );
-      debugPrint('📥 RESPONSE STATUS: ${response.statusCode}');
-      debugPrint('📦 RESPONSE BODY: ${response.body}');
+      debugPrint('ðŸ“¥ RESPONSE STATUS: ${response.statusCode}');
+      debugPrint('ðŸ“¦ RESPONSE BODY: ${response.body}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -3206,9 +2610,9 @@ class _TrendsPageState extends State<_TrendsPage>
                   name.contains('status') ||
                   name.contains('on/off');
             });
-            _selectedParamId =
-                _parameters[smartIndex != -1 ? smartIndex : 0]['shortId']
-                    ?.toString();
+            _selectedParamId = _parameters[smartIndex != -1 ? smartIndex : 0]
+                    ['shortId']
+                ?.toString();
             _fetchChartData();
           }
           _isLoading = false;
@@ -3217,7 +2621,7 @@ class _TrendsPageState extends State<_TrendsPage>
         if (mounted) setState(() => _isLoading = false);
       }
     } catch (e) {
-      debugPrint('❌ Error fetching parameters: $e');
+      debugPrint('âŒ Error fetching parameters: $e');
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -3245,22 +2649,21 @@ class _TrendsPageState extends State<_TrendsPage>
       59,
     ).toUtc().toIso8601String();
 
-    final url =
-        '${AppConfig.provisionBaseUrl}/parameters/chart-data'
+    final url = '${AppConfig.provisionBaseUrl}/parameters/chart-data'
         '?startTime=$startTime&endTime=$endTime'
         '&parameterShortIds=$_selectedParamId'
         '&systemId=${widget.systemId}'
         '&equipmentShortId=${widget.equipmentShortId}'
         '&bucket=${widget.bucket}&companyId=${widget.companyId}&siteId=${widget.siteId}';
 
-    debugPrint('📈 FETCH CHART URL: $url');
+    debugPrint('ðŸ“ˆ FETCH CHART URL: $url');
 
     try {
       final response = await http.get(
         Uri.parse(url),
         headers: {'Authorization': 'Bearer $token'},
       );
-      debugPrint('📊 CHART STATUS: ${response.statusCode}');
+      debugPrint('ðŸ“Š CHART STATUS: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final points = _parseChartDataInBackground(response.body);
@@ -3273,7 +2676,7 @@ class _TrendsPageState extends State<_TrendsPage>
         }
       }
     } catch (e) {
-      debugPrint('❌ Error fetching chart data: $e');
+      debugPrint('âŒ Error fetching chart data: $e');
       if (mounted) setState(() => _isChartLoading = false);
     }
   }
@@ -3492,87 +2895,92 @@ class _TrendsPageState extends State<_TrendsPage>
                     child: _isChartLoading
                         ? _buildChartSkeleton(isDark)
                         : _chartData.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.query_stats_rounded,
-                                  color: Colors.white.withOpacity(0.1),
-                                  size: 48,
+                            ? Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.query_stats_rounded,
+                                      color: Colors.white.withOpacity(0.1),
+                                      size: 48,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      'No Data Available',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.white.withOpacity(0.2),
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'No Data Available',
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.white.withOpacity(0.2),
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500,
+                              )
+                            : SfCartesianChart(
+                                margin: EdgeInsets.zero,
+                                plotAreaBorderWidth: 0,
+                                primaryXAxis: DateTimeAxis(
+                                  dateFormat: DateFormat('h:mm a'),
+                                  majorGridLines:
+                                      const MajorGridLines(width: 0),
+                                  axisLine: const AxisLine(width: 0),
+                                  labelStyle: GoogleFonts.poppins(
+                                    color: Colors.white24,
+                                    fontSize: 9,
                                   ),
                                 ),
-                              ],
-                            ),
-                          )
-                        : SfCartesianChart(
-                            margin: EdgeInsets.zero,
-                            plotAreaBorderWidth: 0,
-                            primaryXAxis: DateTimeAxis(
-                              dateFormat: DateFormat('h:mm a'),
-                              majorGridLines: const MajorGridLines(width: 0),
-                              axisLine: const AxisLine(width: 0),
-                              labelStyle: GoogleFonts.poppins(
-                                color: Colors.white24,
-                                fontSize: 9,
-                              ),
-                            ),
-                            primaryYAxis: NumericAxis(
-                              majorGridLines: MajorGridLines(
-                                width: 1,
-                                color: Colors.white.withOpacity(0.05),
-                                dashArray: const [5, 5],
-                              ),
-                              axisLine: const AxisLine(width: 0),
-                              labelStyle: GoogleFonts.poppins(
-                                color: Colors.white24,
-                                fontSize: 9,
-                              ),
-                            ),
-                            series: <CartesianSeries<_ChartData, DateTime>>[
-                              AreaSeries<_ChartData, DateTime>(
-                                dataSource: _chartData,
-                                xValueMapper: (_ChartData data, _) => data.time,
-                                yValueMapper: (_ChartData data, _) => data.temp,
-                                color: const Color(
-                                  0xFFD4145A,
-                                ), // Pink/Magenta from image
-                                borderColor: const Color(0xFFFF2D55),
-                                borderWidth: 2,
-                                gradient: LinearGradient(
-                                  colors: [
-                                    const Color(0xFFD4145A).withOpacity(0.4),
-                                    const Color(0xFFD4145A).withOpacity(0.0),
-                                  ],
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
+                                primaryYAxis: NumericAxis(
+                                  majorGridLines: MajorGridLines(
+                                    width: 1,
+                                    color: Colors.white.withOpacity(0.05),
+                                    dashArray: const [5, 5],
+                                  ),
+                                  axisLine: const AxisLine(width: 0),
+                                  labelStyle: GoogleFonts.poppins(
+                                    color: Colors.white24,
+                                    fontSize: 9,
+                                  ),
                                 ),
-                                animationDuration: 0,
-                              ),
-                            ],
-                            trackballBehavior: TrackballBehavior(
-                              enable: true,
-                              activationMode: ActivationMode.singleTap,
-                              tooltipSettings: InteractiveTooltip(
-                                enable: true,
-                                format: 'point.x : point.y',
-                                color: const Color(0xFFD4145A),
-                                textStyle: GoogleFonts.poppins(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
+                                series: <CartesianSeries<_ChartData, DateTime>>[
+                                  AreaSeries<_ChartData, DateTime>(
+                                    dataSource: _chartData,
+                                    xValueMapper: (_ChartData data, _) =>
+                                        data.time,
+                                    yValueMapper: (_ChartData data, _) =>
+                                        data.temp,
+                                    color: const Color(
+                                      0xFFD4145A,
+                                    ), // Pink/Magenta from image
+                                    borderColor: const Color(0xFFFF2D55),
+                                    borderWidth: 2,
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        const Color(0xFFD4145A)
+                                            .withOpacity(0.4),
+                                        const Color(0xFFD4145A)
+                                            .withOpacity(0.0),
+                                      ],
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                    ),
+                                    animationDuration: 0,
+                                  ),
+                                ],
+                                trackballBehavior: TrackballBehavior(
+                                  enable: true,
+                                  activationMode: ActivationMode.singleTap,
+                                  tooltipSettings: InteractiveTooltip(
+                                    enable: true,
+                                    format: 'point.x : point.y',
+                                    color: const Color(0xFFD4145A),
+                                    textStyle: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
                   ),
                   const SizedBox(height: 24),
                   TrendsTable(
@@ -3738,11 +3146,13 @@ class _DeviceControlPage extends StatefulWidget {
   final String equipmentName;
   final double initialTemp;
   final double actualTemp;
+  final bool isDark;
 
   const _DeviceControlPage({
     required this.equipmentName,
     required this.initialTemp,
     required this.actualTemp,
+    required this.isDark,
   });
 
   @override
@@ -3759,6 +3169,12 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
   TimeOfDay _scheduleEndTime = const TimeOfDay(hour: 18, minute: 0);
   TimeOfDay _lunchStartTime = const TimeOfDay(hour: 12, minute: 30);
   TimeOfDay _lunchEndTime = const TimeOfDay(hour: 13, minute: 30);
+
+  // Unified Schedule Variables (Strings)
+  String _scheduleOn1 = '--:--';
+  String _scheduleOff1 = '--:--';
+  String _lunchOn = '--:--';
+  String _lunchOff = '--:--';
 
   @override
   void initState() {
@@ -3809,7 +3225,13 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
               isDark: isDark,
               colorScheme: colorScheme,
               onTempChanged: (newTemp) {
-                // Interaction disabled by parent
+                setState(() => _setTemp = newTemp);
+                // In this sub-page, we still publish commands if interaction is enabled
+                // _publishMqttCommand('TEMP_CN:${newTemp.toInt()}'); // Needs access to _publishMqttCommand or pass it
+              },
+              onClearTemp: () {
+                setState(() => _setTemp = 0.0);
+                // _publishMqttCommand('TEMP_CLEAR');
               },
             ),
             const SizedBox(height: 10),
@@ -3845,28 +3267,28 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
             // Daily Schedule
             _buildTimeCard(
               title: 'DAILY SCHEDULE',
-              startTime: _scheduleStartTime,
-              endTime: _scheduleEndTime,
+              startTime: _scheduleOn1,
+              endTime: _scheduleOff1,
               isEnabled: _isScheduleEnabled,
               color: const Color(0xFFF59E0B),
               isDark: isDark,
               onToggle: (val) => setState(() => _isScheduleEnabled = val),
-              onStartTimeTap: () => _selectTime(true, true),
-              onEndTimeTap: () => _selectTime(true, false),
+              onStartTimeTap: () => _showSchedulePicker(isDark),
+              onEndTimeTap: () => _showSchedulePicker(isDark),
             ),
             const SizedBox(height: 15),
 
             // Lunch Break
             _buildTimeCard(
               title: 'LUNCH BREAK',
-              startTime: _lunchStartTime,
-              endTime: _lunchEndTime,
+              startTime: _lunchOn,
+              endTime: _lunchOff,
               isEnabled: _isLunchEnabled,
               color: primaryColor,
               isDark: isDark,
               onToggle: (val) => setState(() => _isLunchEnabled = val),
-              onStartTimeTap: () => _selectTime(false, true),
-              onEndTimeTap: () => _selectTime(false, false),
+              onStartTimeTap: () => _showSchedulePicker(isDark),
+              onEndTimeTap: () => _showSchedulePicker(isDark),
             ),
             const SizedBox(height: 25),
 
@@ -3972,8 +3394,8 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
 
   Widget _buildTimeCard({
     required String title,
-    required TimeOfDay startTime,
-    required TimeOfDay endTime,
+    required String startTime,
+    required String endTime,
     required bool isEnabled,
     required Color color,
     required bool isDark,
@@ -4021,7 +3443,7 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
               Expanded(
                 child: _timePickerButton(
                   'START',
-                  startTime.format(context),
+                  _formatDisplayTime(startTime),
                   isDark,
                   onStartTimeTap,
                 ),
@@ -4035,7 +3457,7 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
               Expanded(
                 child: _timePickerButton(
                   'END',
-                  endTime.format(context),
+                  _formatDisplayTime(endTime),
                   isDark,
                   onEndTimeTap,
                 ),
@@ -4087,55 +3509,84 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
     VoidCallback onTap, {
     double size = 40,
   }) {
+    const themeGreen = Color(0xFF6CC042);
     return GestureDetector(
       onTap: onTap,
       child: Container(
         width: size,
         height: size,
         decoration: BoxDecoration(
-          color: isDark
-              ? Colors.white.withOpacity(0.08)
-              : Colors.black.withOpacity(0.05),
+          color: themeGreen.withAlpha(30),
           shape: BoxShape.circle,
           border: Border.all(
-            color: isDark
-                ? Colors.white.withOpacity(0.1)
-                : Colors.black.withOpacity(0.1),
+            color: themeGreen.withAlpha(120),
+            width: 1.5,
           ),
+          boxShadow: [
+            BoxShadow(
+              color: themeGreen.withAlpha(70),
+              blurRadius: 14,
+              spreadRadius: 2,
+            ),
+          ],
         ),
         child: Icon(
           icon,
-          color: isDark ? Colors.white : Colors.black87,
-          size: size * 0.5,
+          color: themeGreen,
+          size: size * 0.48,
         ),
       ),
     );
   }
 
   Future<void> _selectTime(bool isSchedule, bool isStart) async {
-    final initialTime = isSchedule
-        ? (isStart ? _scheduleStartTime : _scheduleEndTime)
-        : (isStart ? _lunchStartTime : _lunchEndTime);
+    _showSchedulePicker(widget.isDark);
+  }
 
-    final TimeOfDay? picked = await showDialog<TimeOfDay>(
+  void _showSchedulePicker(bool isDark) {
+    showDialog(
       context: context,
-      builder: (context) => _CustomTimePickerDialog(initialTime: initialTime),
+      builder: (context) => _ScheduleControlDialog(
+        isDark: isDark,
+        schedules: [
+          {'on': _scheduleOn1, 'off': _scheduleOff1},
+          {'on': '--:--', 'off': '--:--'},
+          {'on': '--:--', 'off': '--:--'},
+        ],
+        lunch: {'on': _lunchOn, 'off': _lunchOff},
+        onCommand: (type, index, time) {
+          setState(() {
+            if (type == 'SCH_ON' && index == 1) _scheduleOn1 = time;
+            if (type == 'SCH_OFF' && index == 1) _scheduleOff1 = time;
+            if (type == 'LUNCH_ON') _lunchOn = time;
+            if (type == 'LUNCH_OFF') _lunchOff = time;
+            if (type == 'SCH_CLEAR') {
+              if (index == 1) {
+                _scheduleOn1 = '--:--';
+                _scheduleOff1 = '--:--';
+              } else if (index == 4) {
+                _lunchOn = '--:--';
+                _lunchOff = '--:--';
+              }
+            }
+          });
+        },
+      ),
     );
+  }
 
-    if (picked != null) {
-      setState(() {
-        if (isSchedule) {
-          if (isStart)
-            _scheduleStartTime = picked;
-          else
-            _scheduleEndTime = picked;
-        } else {
-          if (isStart)
-            _lunchStartTime = picked;
-          else
-            _lunchEndTime = picked;
-        }
-      });
+  String _formatDisplayTime(String time) {
+    if (time == '--:--' || time.isEmpty || !time.contains(':')) return '--:--';
+    try {
+      final parts = time.split(':');
+      int hour = int.parse(parts[0]);
+      int minute = int.parse(parts[1]);
+      final period = hour >= 12 ? 'PM' : 'AM';
+      int displayHour = hour % 12;
+      if (displayHour == 0) displayHour = 12;
+      return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+    } catch (e) {
+      return '--:--';
     }
   }
 }
@@ -4384,6 +3835,7 @@ class _InteractiveThermostatGauge extends StatelessWidget {
   final bool isDark;
   final ColorScheme colorScheme;
   final ValueChanged<double> onTempChanged;
+  final VoidCallback? onClearTemp;
 
   const _InteractiveThermostatGauge({
     required this.setTemp,
@@ -4391,14 +3843,15 @@ class _InteractiveThermostatGauge extends StatelessWidget {
     required this.isDark,
     required this.colorScheme,
     required this.onTempChanged,
+    this.onClearTemp,
   });
 
   Color _getColorForTemp(double temp) {
-    if (temp < 20) return const Color(0xFFEF4444);
-    if (temp < 22) return const Color(0xFFF59E0B);
-    if (temp < 26) return const Color(0xFF10B981);
-    if (temp < 28) return const Color(0xFFF59E0B);
-    return const Color(0xFFEF4444);
+    if (temp <= 19) return const Color(0xFFEF4444); // Blue
+    if (temp <= 22) return const Color(0xFFF59E0B); // Cyan
+    if (temp <= 26) return const Color(0xFF10B981); // Green
+    if (temp <= 29) return const Color(0xFFF59E0B); // Orange
+    return const Color(0xFFEF4444); // Red
   }
 
   void _handlePan(Offset localPosition, Size size) {
@@ -4424,106 +3877,200 @@ class _InteractiveThermostatGauge extends StatelessWidget {
     }
 
     double newTemp = (relativeAngle / sweepAngle) * 40;
-    newTemp = newTemp.clamp(16.0, 30.0).roundToDouble();
+    newTemp = newTemp.clamp(0.0, 40.0).roundToDouble();
 
     onTempChanged(newTemp);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 320,
-      height: 320,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        boxShadow: [
-          if (isDark)
-            BoxShadow(
-              color: _getColorForTemp(setTemp).withOpacity(0.15),
-              blurRadius: 40,
-              spreadRadius: 5,
-            ),
-        ],
-      ),
-      child: IgnorePointer(
-        ignoring: true, // User cannot handle the circle, only plus/minus
-        child: CustomPaint(
-          size: const Size(320, 320),
-          painter: _InteractiveThermostatPainter(
-            setTemp: setTemp,
-            actualTemp: actualTemp,
-            isDark: isDark,
-            colorScheme: colorScheme,
+    final activeColor = _getColorForTemp(setTemp);
+    // Calculate gauge size to fill available width
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    const buttonSize = 44.0;
+    const gap = 8.0;
+    final gaugeSize =
+        (screenWidth - buttonSize * 2 - gap * 2).clamp(240.0, 310.0);
+    final fontSize = gaugeSize * 0.165; // scale font with gauge
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // Minus Button
+        _buildSideControl(
+          icon: Icons.remove,
+          onTap: () => onTempChanged((setTemp - 1).clamp(0.0, 40.0)),
+          color: activeColor,
+          size: buttonSize,
+        ),
+        const SizedBox(width: gap),
+        // Gauge — fills available screen width
+        Container(
+          width: gaugeSize,
+          height: gaugeSize,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [
+              if (isDark)
+                BoxShadow(
+                  color: activeColor.withOpacity(0.15),
+                  blurRadius: 16, // Reduced from 48 for much better performance
+                  spreadRadius: 4,
+                ),
+            ],
           ),
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  'SET TEMP',
-                  style: GoogleFonts.poppins(
-                    color: (isDark ? Colors.white : colorScheme.primary)
-                        .withOpacity(0.4),
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${setTemp.toInt()}°C',
-                  style: GoogleFonts.poppins(
-                    color: isDark ? Colors.white : const Color(0xFF1B172E),
-                    fontSize: 52,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _getColorForTemp(actualTemp).withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: _getColorForTemp(actualTemp).withOpacity(0.3),
+          child: CustomPaint(
+            size: Size(gaugeSize, gaugeSize),
+            painter: _InteractiveThermostatPainter(
+              setTemp: setTemp,
+              actualTemp: actualTemp,
+              isDark: isDark,
+              colorScheme: colorScheme,
+            ),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'ACTUAL',
+                    style: GoogleFonts.poppins(
+                      color: (isDark ? Colors.white : colorScheme.primary)
+                          .withOpacity(0.4),
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2,
                     ),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'ACTUAL',
-                        style: GoogleFonts.poppins(
-                          color: _getColorForTemp(actualTemp),
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1.0,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '${actualTemp.toStringAsFixed(1)}°C',
-                        style: GoogleFonts.poppins(
-                          color: isDark
-                              ? Colors.white
-                              : const Color(0xFF1B172E),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: 4),
+                  Text(
+                    '${actualTemp.toStringAsFixed(1)}\u00b0C',
+                    style: GoogleFonts.poppins(
+                      color: isDark ? Colors.white : const Color(0xFF1B172E),
+                      fontSize: fontSize,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: activeColor.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: activeColor.withOpacity(0.3),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'SET TEMP',
+                          style: GoogleFonts.poppins(
+                            color: activeColor,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.0,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${setTemp.toInt()}\u00b0C',
+                          style: GoogleFonts.poppins(
+                            color:
+                                isDark ? Colors.white : const Color(0xFF1B172E),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        if (onClearTemp != null) ...[
+                          const SizedBox(width: 6),
+                          GestureDetector(
+                            onTap: onClearTemp,
+                            child: Container(
+                              padding: const EdgeInsets.all(2),
+                              decoration: BoxDecoration(
+                                color: activeColor.withOpacity(0.2),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.close_rounded,
+                                color: activeColor,
+                                size: 10,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
+          ),
+        ),
+        const SizedBox(width: gap),
+        // Plus Button
+        _buildSideControl(
+          icon: Icons.add,
+          onTap: () => onTempChanged((setTemp + 1).clamp(0.0, 40.0)),
+          color: activeColor,
+          size: buttonSize,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSideControl({
+    required IconData icon,
+    required VoidCallback onTap,
+    required Color color,
+    double size = 52,
+  }) {
+    // Auto-color: green for +, red for −
+    final isPlus = icon == Icons.add || icon == Icons.add_rounded;
+    final accentColor = isPlus
+        ? const Color(0xFF6CC042)
+        : const Color(0xFFEF4444);
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: const Color(0xFF1B172E),
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.white.withAlpha(50),
+            width: 1.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: accentColor.withAlpha(70),
+              blurRadius: 16,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
+        child: Center(
+          child: Icon(
+            icon,
+            color: accentColor,
+            size: size * 0.45,
           ),
         ),
       ),
     );
   }
 }
+
+
 
 class _InteractiveThermostatPainter extends CustomPainter {
   final double setTemp;
@@ -4539,11 +4086,11 @@ class _InteractiveThermostatPainter extends CustomPainter {
   });
 
   Color _getColorForTemp(double temp) {
-    if (temp < 20) return const Color(0xFFEF4444);
-    if (temp < 22) return const Color(0xFFF59E0B);
-    if (temp < 26) return const Color(0xFF10B981);
-    if (temp < 28) return const Color(0xFFF59E0B);
-    return const Color(0xFFEF4444);
+    if (temp <= 19) return const Color(0xFFEF4444); // Blue
+    if (temp <= 22) return const Color(0xFFF59E0B); // Cyan
+    if (temp <= 26) return const Color(0xFF10B981); // Green
+    if (temp <= 29) return const Color(0xFFF59E0B); // Orange
+    return const Color(0xFFEF4444); // Red
   }
 
   @override
@@ -4569,11 +4116,11 @@ class _InteractiveThermostatPainter extends CustomPainter {
       canvas.drawArc(trackRect, sAngle, swAngle, false, trackPaint);
     }
 
-    drawTrackRange(0, 20, const Color(0xFFEF4444));
-    drawTrackRange(20, 22, const Color(0xFFFBBF24));
+    drawTrackRange(0, 19, const Color(0xFFEF4444));
+    drawTrackRange(19, 22, const Color(0xFFF59E0B));
     drawTrackRange(22, 26, const Color(0xFF6CC042));
-    drawTrackRange(26, 28, const Color(0xFFFBBF24));
-    drawTrackRange(28, 40, const Color(0xFFEF4444));
+    drawTrackRange(26, 29, const Color(0xFFFBBF24));
+    drawTrackRange(29, 40, const Color(0xFFEF4444));
 
     final fullTrackPaint = Paint()
       ..color = isDark
@@ -4583,22 +4130,7 @@ class _InteractiveThermostatPainter extends CustomPainter {
       ..strokeWidth = 12;
     canvas.drawCircle(center, radius - 15, fullTrackPaint);
 
-    final dotPoints = [20.0, 22.0, 26.0, 28.0];
-    for (final p in dotPoints) {
-      final angle = tempToAngle(p);
-      final dotPos = Offset(
-        center.dx + (radius - 15) * math.cos(angle),
-        center.dy + (radius - 15) * math.sin(angle),
-      );
-      final dotColor = _getColorForTemp(p);
-      canvas.drawCircle(
-        dotPos,
-        4,
-        Paint()..color = Colors.black.withOpacity(0.5),
-      );
-      canvas.drawCircle(dotPos, 3, Paint()..color = dotColor);
-    }
-
+    // Draw the static gauge lines/arcs...
     final basePaint = Paint()
       ..color = isDark
           ? Colors.white.withOpacity(0.05)
@@ -4608,8 +4140,8 @@ class _InteractiveThermostatPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
     canvas.drawArc(trackRect, startAngle, sweepAngle, false, basePaint);
 
-    // Active Arc for ACTUAL TEMP
-    final activeColor = _getColorForTemp(actualTemp);
+    // Active Arc for SET TEMP (Dynamic color based on temp)
+    final activeColor = _getColorForTemp(setTemp);
     final activePaint = Paint()
       ..color = activeColor
       ..style = PaintingStyle.stroke
@@ -4617,45 +4149,46 @@ class _InteractiveThermostatPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
 
     final glowPaint = Paint()
-      ..color = activeColor.withOpacity(0.3)
+      ..color = activeColor
+          .withOpacity(0.2) // slightly lower opacity to compensate for no blur
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 20
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8)
+      ..strokeWidth = 24 // wider to act as a soft edge
       ..strokeCap = StrokeCap.round;
 
-    final currentSweep = (actualTemp / 40) * sweepAngle;
-    canvas.drawArc(trackRect, startAngle, currentSweep, false, glowPaint);
-    canvas.drawArc(trackRect, startAngle, currentSweep, false, activePaint);
+    final setSweep = (setTemp / 40) * sweepAngle;
+    canvas.drawArc(trackRect, startAngle, setSweep, false, glowPaint);
+    canvas.drawArc(trackRect, startAngle, setSweep, false, activePaint);
 
-    // Handle for ACTUAL TEMP
-    final handleAngle = currentSweep + startAngle;
+    // Handle for SET TEMP (Visual indicator only)
+    final handleAngle = setSweep + startAngle;
     final handlePos = Offset(
       center.dx + (radius - 15) * math.cos(handleAngle),
       center.dy + (radius - 15) * math.sin(handleAngle),
     );
 
+    // Simple shadow/border instead of expensive blur
     canvas.drawCircle(
       handlePos,
-      12, // Bigger handle for grabbing
+      12, // Handle dot size
       Paint()
-        ..color = Colors.white
-        ..style = PaintingStyle.fill
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+        ..color = Colors.white.withOpacity(0.3)
+        ..style = PaintingStyle.fill,
     );
     canvas.drawCircle(handlePos, 10, Paint()..color = Colors.white);
     canvas.drawCircle(handlePos, 6, Paint()..color = activeColor);
 
-    // Radial Ticks (Up to ACTUAL TEMP)
+    // (Actual Temperature Indicator removed as requested)
+
     for (int i = 0; i <= 60; i++) {
       final angle = (i / 60) * sweepAngle + startAngle;
       final tickTemp = (i / 60) * 40;
-      final isActive = tickTemp <= actualTemp;
+      final isActive = tickTemp <= setTemp;
       final tickPaint = Paint()
         ..color = isActive
             ? activeColor
             : (isDark
-                  ? Colors.white.withOpacity(0.1)
-                  : Colors.black.withOpacity(0.1))
+                ? Colors.white.withOpacity(0.1)
+                : Colors.black.withOpacity(0.1))
         ..strokeWidth = 1.5;
       final innerR = radius - 45;
       final outerR = radius - 30;
@@ -4672,7 +4205,7 @@ class _InteractiveThermostatPainter extends CustomPainter {
       );
     }
 
-    final labelPoints = [0, 20, 22, 26, 28, 40];
+    final labelPoints = [0, 19, 22, 26, 29, 40];
     for (final p in labelPoints) {
       final angle = tempToAngle(p.toDouble());
       final labelR = radius + 15;
@@ -4712,20 +4245,75 @@ class _InteractiveThermostatPainter extends CustomPainter {
   }
 }
 
-class _ScheduleControlDialog extends StatelessWidget {
+class _ScheduleControlDialog extends StatefulWidget {
   final bool isDark;
-  final String initialOn;
-  final String initialOff;
-  final Function(String type, String time) onCommand;
-  final VoidCallback onClear;
+  final List<Map<String, String>> schedules;
+  final Map<String, String> lunch;
+  final Function(String type, int index, String time) onCommand;
 
   const _ScheduleControlDialog({
     required this.isDark,
-    required this.initialOn,
-    required this.initialOff,
+    required this.schedules,
+    required this.lunch,
     required this.onCommand,
-    required this.onClear,
   });
+
+  @override
+  State<_ScheduleControlDialog> createState() => _ScheduleControlDialogState();
+}
+
+class _ScheduleControlDialogState extends State<_ScheduleControlDialog> {
+  // Local mutable copies so the UI updates immediately on pick
+  late List<Map<String, String>> _localSchedules;
+  late Map<String, String> _localLunch;
+
+  @override
+  void initState() {
+    super.initState();
+    _localSchedules =
+        widget.schedules.map((s) => Map<String, String>.from(s)).toList();
+    _localLunch = Map<String, String>.from(widget.lunch);
+  }
+
+  void _handleCommand(String type, int index, String time) {
+    // 1. Update local state so the dialog refreshes immediately
+    setState(() {
+      if (type == 'SCH_ON' && index >= 1 && index <= 3) {
+        _localSchedules[index - 1]['on'] = time;
+      }
+      if (type == 'SCH_OFF' && index >= 1 && index <= 3) {
+        _localSchedules[index - 1]['off'] = time;
+      }
+      if (type == 'LUNCH_ON') _localLunch['on'] = time;
+      if (type == 'LUNCH_OFF') _localLunch['off'] = time;
+      if (type == 'SCH_CLEAR') {
+        if (index >= 1 && index <= 3) {
+          _localSchedules[index - 1]['on'] = '--:--';
+          _localSchedules[index - 1]['off'] = '--:--';
+        }
+        if (index == 4) {
+          _localLunch['on'] = '--:--';
+          _localLunch['off'] = '--:--';
+        }
+      }
+    });
+    // 2. Forward to parent (updates parent state + publishes MQTT)
+    widget.onCommand(type, index, time);
+  }
+
+  void _handleClearAll() {
+    // Reset all local state
+    setState(() {
+      for (int i = 0; i < _localSchedules.length; i++) {
+        _localSchedules[i]['on'] = '--:--';
+        _localSchedules[i]['off'] = '--:--';
+      }
+      _localLunch['on'] = '--:--';
+      _localLunch['off'] = '--:--';
+    });
+    // Forward to parent with a single MQTT command
+    widget.onCommand('SCH_CLEAR_ALL', 0, '');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4733,7 +4321,10 @@ class _ScheduleControlDialog extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: Container(
-          width: MediaQuery.of(context).size.width * 0.85,
+          width: MediaQuery.of(context).size.width * 0.9,
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.8,
+          ),
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
             color: const Color(0xFF1B172E),
@@ -4753,69 +4344,124 @@ class _ScheduleControlDialog extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF6CC042).withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.calendar_today_rounded,
-                  color: Color(0xFF6CC042),
-                  size: 24,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Schedule Manager",
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      Text(
+                        "Manage all timings in one place",
+                        style: GoogleFonts.poppins(
+                          color: Colors.white38,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6CC042).withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.calendar_month_rounded,
+                      color: Color(0xFF6CC042),
+                      size: 20,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (int i = 0; i < _localSchedules.length; i++)
+                      _buildScheduleSlot(
+                        context,
+                        "DAILY SCHEDULE ${i + 1}",
+                        _localSchedules[i]['on']!,
+                        _localSchedules[i]['off']!,
+                        i + 1,
+                        false,
+                        i == 0
+                            ? const Color(0xFF6CC042)
+                            : i == 1
+                                ? const Color(0xFF3B82F6)
+                                : const Color(0xFFF59E0B),
+                      ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8.0),
+                      child: Divider(color: Colors.white10, height: 1),
+                    ),
+                    _buildScheduleSlot(
+                      context,
+                      "LUNCH BREAK",
+                      _localLunch['on']!,
+                      _localLunch['off']!,
+                      4,
+                      true,
+                      const Color(0xFFEF4444),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 16),
-              Text(
-                "Daily Schedule",
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              Text(
-                "Manage your AC timing",
-                style: GoogleFonts.poppins(
-                  color: Colors.white38,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 32),
-              _buildTimeRow(context, "START TIME", initialOn, "SCH_ON"),
-              const SizedBox(height: 16),
-              _buildTimeRow(context, "END TIME", initialOff, "SCH_OFF"),
-              const SizedBox(height: 32),
+              // Clear All Schedules Button
               SizedBox(
                 width: double.infinity,
-                child: TextButton(
-                  onPressed: () {
-                    onClear();
-                    Navigator.pop(context);
-                  },
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.redAccent,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  child: const Text(
+                child: OutlinedButton.icon(
+                  onPressed: _handleClearAll,
+                  icon: const Icon(Icons.delete_sweep_rounded, size: 18),
+                  label: Text(
                     "CLEAR ALL SCHEDULES",
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1,
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.redAccent,
+                    side: BorderSide(color: Colors.redAccent.withOpacity(0.4)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(
-                  "CLOSE",
-                  style: GoogleFonts.poppins(
-                    color: Colors.white24,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF6CC042),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: Text(
+                    "SAVE",
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1,
+                    ),
                   ),
                 ),
               ),
@@ -4826,84 +4472,226 @@ class _ScheduleControlDialog extends StatelessWidget {
     );
   }
 
-  Widget _buildTimeRow(
+  Widget _buildScheduleSlot(
+    BuildContext context,
+    String label,
+    String on,
+    String off,
+    int index,
+    bool isLunch,
+    Color color,
+  ) {
+    final bool isActive = on != '--:--' && off != '--:--';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isActive ? color.withOpacity(0.3) : Colors.white.withOpacity(0.05),
+        ),
+        boxShadow: isActive
+            ? [
+                BoxShadow(
+                  color: color.withOpacity(0.05),
+                  blurRadius: 15,
+                  spreadRadius: 2,
+                )
+              ]
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 3,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: color.withOpacity(0.5),
+                          blurRadius: 4,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    label,
+                    style: GoogleFonts.poppins(
+                      color: color,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
+              GestureDetector(
+                onTap: () => _handleCommand('SCH_CLEAR', index, ''),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: Colors.redAccent.withOpacity(0.3),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.clear_rounded,
+                          color: Colors.redAccent, size: 12),
+                      const SizedBox(width: 4),
+                      Text(
+                        "CLEAR",
+                        style: GoogleFonts.poppins(
+                          color: Colors.redAccent,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _timeSelector(
+                  context,
+                  "START",
+                  on,
+                  isLunch ? 'LUNCH_ON' : 'SCH_ON',
+                  index,
+                  color,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _timeSelector(
+                  context,
+                  "END",
+                  off,
+                  isLunch ? 'LUNCH_OFF' : 'SCH_OFF',
+                  index,
+                  color,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _timeSelector(
     BuildContext context,
     String label,
     String current,
     String type,
+    int index,
+    Color themeColor,
   ) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Column(
+    final bool isSet = current != '--:--';
+    
+    return GestureDetector(
+      onTap: () async {
+        final picked = await showTimePicker(
+          context: context,
+          initialTime: TimeOfDay.now(),
+          builder: (context, child) {
+            return Theme(
+              data: ThemeData.dark().copyWith(
+                colorScheme: ColorScheme.dark(
+                  primary: themeColor,
+                  onPrimary: Colors.white,
+                  surface: const Color(0xFF1B172E),
+                  onSurface: Colors.white,
+                ),
+              ),
+              child: child!,
+            );
+          },
+        );
+        if (picked != null) {
+          final formatted =
+              "${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}";
+          _handleCommand(type, index, formatted);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        decoration: BoxDecoration(
+          color: isSet ? themeColor.withOpacity(0.08) : Colors.white.withOpacity(0.03),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isSet ? themeColor.withOpacity(0.4) : Colors.white.withOpacity(0.08),
+          ),
+        ),
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              label,
-              style: GoogleFonts.poppins(
-                color: Colors.white24,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-              ),
+            Row(
+              children: [
+                Icon(
+                  Icons.access_time_rounded,
+                  size: 10,
+                  color: isSet ? themeColor : Colors.white30,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  label,
+                  style: GoogleFonts.poppins(
+                    color: isSet ? themeColor : Colors.white30,
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+              ],
             ),
+            const SizedBox(height: 4),
             Text(
-              current,
+              _formatDisplayTime(current),
               style: GoogleFonts.poppins(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
+                color: isSet ? Colors.white : Colors.white24,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ],
         ),
-        ElevatedButton(
-          onPressed: () async {
-            final picked = await showTimePicker(
-              context: context,
-              initialTime: TimeOfDay.now(),
-              builder: (context, child) {
-                return Theme(
-                  data: isDark
-                      ? ThemeData.dark().copyWith(
-                          colorScheme: const ColorScheme.dark(
-                            primary: Color(0xFF6CC042),
-                            onPrimary: Colors.white,
-                            surface: Color(0xFF1B172E),
-                            onSurface: Colors.white,
-                          ),
-                        )
-                      : ThemeData.light().copyWith(
-                          colorScheme: const ColorScheme.light(
-                            primary: Color(0xFF6CC042),
-                          ),
-                        ),
-                  child: child!,
-                );
-              },
-            );
-            if (picked != null) {
-              final formatted =
-                  "${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}";
-              onCommand(type, formatted);
-              if (context.mounted) {
-                Navigator.pop(context);
-              }
-            }
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF6CC042).withOpacity(0.1),
-            foregroundColor: const Color(0xFF6CC042),
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-          child: const Text("SET"),
-        ),
-      ],
+      ),
     );
   }
+
+  String _formatDisplayTime(String time) {
+    if (time == '--:--' || time.isEmpty || !time.contains(':')) return '--:--';
+    try {
+      final parts = time.split(':');
+      int hour = int.parse(parts[0]);
+      int minute = int.parse(parts[1]);
+      final period = hour >= 12 ? 'PM' : 'AM';
+      int displayHour = hour % 12;
+      if (displayHour == 0) displayHour = 12;
+      return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+    } catch (e) {
+      return '--:--';
+    }
+  }
 }
-
-
-

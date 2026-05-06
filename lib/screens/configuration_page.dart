@@ -123,11 +123,11 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   bool _isMqttConnected = false;
   String _mqttStatus = "MQTT not connected";
 
-  final TextEditingController _mqttHostController = TextEditingController(text: "test.mosquitto.org");
+  final TextEditingController _mqttHostController = TextEditingController(text: "13.66.130.236");
   final TextEditingController _mqttPortController = TextEditingController(text: "1883");
-  final TextEditingController _mqttUserController = TextEditingController(text: "sustainabyte_demo");
-  final TextEditingController _mqttPassController = TextEditingController(text: "public");
-  final TextEditingController _mqttTopicController = TextEditingController(text: "sustainabyte_demo/time");
+  final TextEditingController _mqttUserController = TextEditingController(text: "testir");
+  final TextEditingController _mqttPassController = TextEditingController(text: "ir@123");
+  final TextEditingController _mqttTopicController = TextEditingController(text: "sustainabyte/testir/control");
 
   // ===================== Auto control =====================
   bool _autoControlEnabled = false;

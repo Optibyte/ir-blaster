@@ -87,4 +87,15 @@ class LocalCacheService {
     }
     return null;
   }
+
+  /// Clear all cached data (used during logout)
+  static Future<void> clearAll() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+      debugPrint('🧹 [Cache] All local storage cleared.');
+    } catch (e) {
+      debugPrint('⚠️ [Cache] Error clearing cache: $e');
+    }
+  }
 }

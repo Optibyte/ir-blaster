@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../../../../optibyte(workspace)/opti-provission"
+		},
+		{
+			"path": "../../../../optibyte(workspace)/optibyte-ui"
 		}
 	],
 	"settings": {}

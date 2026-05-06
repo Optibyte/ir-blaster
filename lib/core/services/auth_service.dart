@@ -1,8 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
+import 'package:ir_blaster_ac/core/services/local_cache_service.dart';
+import 'package:ir_blaster_ac/core/config/app_config.dart';
 
-/// Handles mock authentication for design-only mode.
+/// Handles authentication and session management using ProvisionService API.
 class AuthService {
   // ── Storage keys ────────────────────────────────────────────────────
   static const String _cookieKey = 'session_cookie';
@@ -17,73 +20,73 @@ class AuthService {
     aOptions: AndroidOptions(),
   );
 
-  /// Mock login that always succeeds.
+  /// Performs a real login by hitting the auth service.
   static Future<String?> login(String email, String password) async {
     try {
-      // Simulate network delay
-      await Future.delayed(const Duration(milliseconds: 800));
+      debugPrint('🔐 [AuthService] Attempting login for: $email');
+      
+      final response = await http.post(
+        Uri.parse(AppConfig.loginEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'password': password,
+        }),
+      );
 
-      // Mock user data matching the real response structure
-      final mockUser = {
-        'userId': 'a96290dd-0fb2-4722-9dd6-d26621317c23',
-        'name': 'Mahavir',
-        'email': email,
-        'role': 'site_technician',
-        'company': 'a4764d8d-7b79-43e1-8e48-e62096c28cc7',
-        'bucket': 'mahavir01',
-        'type': 'Employee',
-        'site': '3fcc7555-3fbb-4cbc-913f-18a2a3094d47',
-        'zone': '8e8836ab-cea0-4e54-af84-609bffdf292a',
-        'serviceType': 'EMS'
-      };
+      debugPrint('🔐 [AuthService] Login Status: ${response.statusCode}');
 
-      // Mock full response for console logging
-      final mockResponse = {
-        'status': 1,
-        'message': 'Login successful.',
-        'data': mockUser,
-        'token': 'mock_session_token'
-      };
-      debugPrint(
-          '🔐 [AuthService] Login Response: ${jsonEncode(mockResponse)}');
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> body = jsonDecode(response.body);
+        
+        if (body['status'] == 1) {
+          final userData = body['data'];
+          final token = body['token'] ?? 'valid_session';
 
-      // Persist mock session and user details
-      await _storage.write(key: _cookieKey, value: 'mock_session_token');
-      await _storage.write(key: _emailKey, value: email);
-      await _storage.write(key: _userDataKey, value: jsonEncode(mockUser));
-      await _storage.write(
-          key: _companyIdKey, value: mockUser['company'] as String);
-      await _storage.write(
-          key: _bucketKey, value: mockUser['bucket'] as String);
-      await _storage.write(key: _siteIdKey, value: mockUser['site'] as String);
-      await _storage.write(key: _zoneIdKey, value: mockUser['zone'] as String);
+          // Persist session and user details from the REAL response
+          await _storage.write(key: _cookieKey, value: token);
+          await _storage.write(key: _emailKey, value: email);
+          await _storage.write(key: _userDataKey, value: jsonEncode(userData));
+          
+          // Use dynamic fields from API response
+          await _storage.write(key: _companyIdKey, value: userData['company']?.toString() ?? '');
+          await _storage.write(key: _bucketKey, value: userData['bucket']?.toString() ?? '');
+          await _storage.write(key: _siteIdKey, value: userData['site']?.toString() ?? '');
+          await _storage.write(key: _zoneIdKey, value: userData['zone']?.toString() ?? '');
 
-      // Log specific storage keys for debugging
-      debugPrint('📦 [Storage] Saved $_cookieKey: mock_session_token');
-      debugPrint('📦 [Storage] Saved $_emailKey: $email');
-      debugPrint('📦 [Storage] Saved $_userDataKey: ${jsonEncode(mockUser)}');
-      debugPrint('📦 [Storage] Saved $_companyIdKey: ${mockUser['company']}');
-      debugPrint('📦 [Storage] Saved $_bucketKey: ${mockUser['bucket']}');
-      debugPrint('📦 [Storage] Saved $_siteIdKey: ${mockUser['site']}');
-
-      return null; // ✅ Success
+          debugPrint('✅ [AuthService] Login successful. Data persisted for bucket: ${userData['bucket']}');
+          return null; // Success
+        } else {
+          return body['message'] ?? 'Login failed';
+        }
+      } else {
+        return 'Server error: ${response.statusCode}';
+      }
     } catch (e) {
-      return 'Error: $e';
+      debugPrint('❌ [AuthService] Login Exception: $e');
+      return 'Connection error: $e';
     }
   }
 
-  /// Mock verify that returns stored user data if session exists.
+  /// Verifies current session by hitting the verify endpoint.
   static Future<Map<String, dynamic>?> verify() async {
     try {
-      final cookie = await _storage.read(key: _cookieKey);
-      if (cookie == null || cookie.isEmpty) return null;
+      final token = await _storage.read(key: _cookieKey);
+      if (token == null || token.isEmpty) return null;
 
-      final userDataRaw = await _storage.read(key: _userDataKey);
-      if (userDataRaw != null) {
-        final userData = jsonDecode(userDataRaw) as Map<String, dynamic>;
-        debugPrint(
-            '✅ [AuthService] Verify Response: {"status": 1, "data": $userDataRaw}');
-        return userData;
+      final response = await http.get(
+        Uri.parse(AppConfig.verifyEndpoint),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body);
+        if (body['status'] == 1) {
+          return body['data'];
+        }
       }
       return null;
     } catch (e) {
@@ -125,5 +128,8 @@ class AuthService {
     await _storage.delete(key: _bucketKey);
     await _storage.delete(key: _siteIdKey);
     await _storage.delete(key: _zoneIdKey);
+
+    // Also clear the general cache (SharedPreferences)
+    await LocalCacheService.clearAll();
   }
 }

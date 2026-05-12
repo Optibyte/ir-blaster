@@ -8,6 +8,9 @@
 		},
 		{
 			"path": "../../../../optibyte(workspace)/optibyte-ui"
+		},
+		{
+			"path": "../../../../optibyte(workspace)/optibyte-Auth-service"
 		}
 	],
 	"settings": {}

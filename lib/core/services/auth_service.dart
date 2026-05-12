@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -32,7 +33,7 @@ class AuthService {
           'email': email,
           'password': password,
         }),
-      );
+      ).timeout(const Duration(seconds: 10));
 
       debugPrint('🔐 [AuthService] Login Status: ${response.statusCode}');
 
@@ -41,7 +42,20 @@ class AuthService {
         
         if (body['status'] == 1) {
           final userData = body['data'];
-          final token = body['token'] ?? 'valid_session';
+          
+          // Extract token from set-cookie header since the new AuthService uses HTTP-only cookies
+          String token = body['token'] ?? '';
+          if (token.isEmpty) {
+            final String? rawCookie = response.headers['set-cookie'];
+            if (rawCookie != null) {
+              final int index = rawCookie.indexOf('auth_token=');
+              if (index != -1) {
+                final int endIndex = rawCookie.indexOf(';', index);
+                token = rawCookie.substring(index + 11, endIndex != -1 ? endIndex : rawCookie.length);
+              }
+            }
+          }
+          if (token.isEmpty) token = 'valid_session';
 
           // Persist session and user details from the REAL response
           await _storage.write(key: _cookieKey, value: token);
@@ -77,7 +91,7 @@ class AuthService {
       final response = await http.get(
         Uri.parse(AppConfig.verifyEndpoint),
         headers: {
-          'Authorization': 'Bearer $token',
+          'Cookie': 'auth_token=$token',
           'Content-Type': 'application/json',
         },
       );

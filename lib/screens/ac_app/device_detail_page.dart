@@ -36,7 +36,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   // UI State
   double _setTemperature = 24.0; // Fixed static value
   double _actualTemperature = 0.0;
-  bool _isOnline = true; // Tracks WIFI/Online status
+  bool _isOnline = false; // Tracks WIFI/Online status (initialized to inactive)
+  ScaffoldMessengerState? _messenger;
   int _humidity = 0;
   String _scheduleOn1 = '--:--';
   String _scheduleOff1 = '--:--';
@@ -71,6 +72,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   DateTime _lastUpdateTime = DateTime.now(); // For throttling UI updates
   DateTime _lastManualCommandTime = DateTime.fromMillisecondsSinceEpoch(0);
   bool _isPowerCommandLock = false;
+  DateTime _lastSetStateTime = DateTime.now(); // For throttling UI rebuilds
 
   // Animation State
   AnimationController? _pulseController;
@@ -78,8 +80,16 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   // Polling State
   Timer? _pollTimer;
   Timer? _inactiveTimeUpdateTimer; // Timer to update inactive time display
+  Timer? _statusWatchdogTimer; // Timer to detect device disconnects
   MqttServerClient? _persistentMqttClient;
   String _subscribedDeviceId = '';
+  DateTime _lastMessageReceivedTime = DateTime.now();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _messenger = ScaffoldMessenger.of(context);
+  }
 
   @override
   void initState() {
@@ -112,9 +122,25 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     }
 
     // Setup timer to update inactive time display every second
-    _inactiveTimeUpdateTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+    _inactiveTimeUpdateTimer =
+        Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted && _inactiveStartTime != null) {
         _updateInactiveTimeString();
+      }
+    });
+
+    // Efficient Watchdog: Periodically check if we haven't received a message in 10 seconds
+    _statusWatchdogTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (mounted && _isOnline) {
+        if (DateTime.now().difference(_lastMessageReceivedTime) >
+            const Duration(seconds: 10)) {
+          setState(() {
+            _isOnline = false;
+            _inactiveStartTime = DateTime.now();
+            debugPrint(
+                '⚠️ [Watchdog] No messages received for 10s. Setting to OFFLINE.');
+          });
+        }
       }
     });
   }
@@ -178,7 +204,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           _setupPersistentMqtt();
         }
       } catch (e) {
-        debugPrint('âš ï¸ Error mapping equipment data: $e');
+        debugPrint('âš ï¸  Error mapping equipment data: $e');
       }
     });
   }
@@ -193,7 +219,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           _actualTemperature = (status['temp'] as num).toDouble();
         if (status['hum'] != null) _humidity = (status['hum'] as num).toInt();
         if (status['power'] != null) _isPowerOn = status['power'] as bool;
-        if (status['online'] != null) _isOnline = status['online'] as bool;
+        // WiFi Online status is no longer loaded from cache to ensure it always starts as INACTIVE
+        // and only becomes ACTIVE when a fresh MQTT status JSON is received.
       });
     }
   }
@@ -204,7 +231,10 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     _pulseController?.dispose();
     _pollTimer?.cancel();
     _inactiveTimeUpdateTimer?.cancel();
+    _statusWatchdogTimer?.cancel();
     _persistentMqttClient?.disconnect();
+    // Safely clear any active snackbars using the stored messenger reference
+    _messenger?.clearSnackBars();
     super.dispose();
   }
 
@@ -269,34 +299,10 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
     _closeStream();
 
-    // Fetch full equipment details to get the IMEI if not already available
-    String deviceId = shortId;
-    try {
-      final token = await AuthService.getCookieHeader() ?? '';
-      final url = '${AppConfig.provisionBaseUrl}/equipments/$equipmentId';
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final equipData = data['data'];
-        if (equipData != null) {
-          final imei =
-              (equipData['imei'] ?? equipData['Imei'])?.toString() ?? '';
-          if (imei.isNotEmpty) {
-            deviceId = imei;
-            debugPrint('📡 [DeviceDetail] Resolved IMEI from API: $deviceId');
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('⚠️ Error fetching equipment details for IMEI: $e');
-    }
+    // Resolve IMEI using the helper function to avoid redundancy
+    final String resolvedDeviceId = await _fetchEquipmentImei(equipmentId);
+    final String deviceId =
+        resolvedDeviceId.isNotEmpty ? resolvedDeviceId : shortId;
 
     setState(() {
       _selectedEquipmentId = equipmentId;
@@ -305,21 +311,23 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       _selectedEquipmentShortId = shortId;
       _deviceId = deviceId; // Set to IMEI if found, else fallback to shortId
       _isLoadingEquipments = true;
+      _isOnline =
+          false; // Reset to inactive until confirmed by new device status JSON
       _isTelemetryLoading = true;
       _tempHistory.clear();
       _recentLogs.clear();
     });
 
-    final imei = await _fetchEquipmentImei(equipmentId);
+    // The deviceId is already resolved above
 
     if (mounted) {
       setState(() {
-        _deviceId = imei;
+        _deviceId = deviceId;
         _isLoadingEquipments = false;
         _setupPersistentMqtt();
       });
 
-      if (imei.isNotEmpty) {
+      if (deviceId.isNotEmpty) {
         // HTTP Stream disabled to fix lag - all telemetry is now handled via direct MQTT
         // _connectToStream(imei);
       } else {
@@ -358,17 +366,17 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         );
       }
     } catch (e) {
-      debugPrint('âŒ Error fetching MQTT configs: $e');
+      debugPrint('â Œ Error fetching MQTT configs: $e');
     }
 
     if (selectedConfig == null) {
-      debugPrint('âš ï¸ No AC Compressor MQTT config found, using defaults.');
+      debugPrint('âš ï¸  No AC Compressor MQTT config found, using defaults.');
     }
 
     _publishMqttCommand(value ? 'ON' : 'OFF');
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      _messenger?.showSnackBar(
         SnackBar(
           content: Text(
               'Power ${value ? 'ON' : 'OFF'} for Device: ${_deviceId.isEmpty ? 'testir' : _deviceId}'),
@@ -436,38 +444,57 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         _persistentMqttClient!.updates!
             .listen((List<MqttReceivedMessage<MqttMessage?>>? c) {
           final recMess = c![0].payload as MqttPublishMessage;
+          final String topic = c![0].topic;
           final pt =
               MqttPublishPayload.bytesToStringAsString(recMess.payload.message);
-          debugPrint('ðŸ“¥ [MQTT Live] Status Message: $pt');
-          _handleMqttTelemetry(pt);
+          _handleMqttTelemetry(topic, pt);
         });
       }
     } catch (e) {
       _isConnectingMqtt = false;
       debugPrint('? [MQTT Live] Connection Error: $e');
-      Future.delayed(const Duration(seconds: 10), () => _setupPersistentMqtt());
+      Future.delayed(const Duration(seconds: 3), () => _setupPersistentMqtt());
     }
   }
 
-  void _handleMqttTelemetry(String payload) {
-    debugPrint('📥 [MQTT DEBUG] Raw Payload: "$payload"');
+  void _handleMqttTelemetry(String topic, String payload) {
+    final String statusTopic = _getDeviceTopic('status');
+    final bool isStatusTopic = topic == statusTopic;
     bool hasChanges = false;
     final String upperPayload = payload.trim().toUpperCase();
 
-    setState(() {
-      // 0. Handle JSON Payload
-      if (payload.trim().startsWith('{')) {
-        try {
-          // Fix potentially malformed JSON from device (e.g., "set_temp":,)
-          String safePayload = payload;
-          if (safePayload.contains('"set_temp":,')) {
-            safePayload = safePayload.replaceAll('"set_temp":,', '"set_temp":null,');
-          }
-          
-          final data = jsonDecode(safePayload);
-          final Map<String, dynamic> p = (data['data'] != null)
-              ? Map<String, dynamic>.from(data['data'])
-              : Map<String, dynamic>.from(data);
+    // 0. Handle JSON Payload
+    if (payload.trim().startsWith('{')) {
+      try {
+        // Fix potentially malformed JSON from device (e.g., "set_temp":,)
+        String safePayload = payload;
+        if (safePayload.contains('"set_temp":,')) {
+          safePayload =
+              safePayload.replaceAll('"set_temp":,', '"set_temp":null,');
+        }
+
+        final data = jsonDecode(safePayload);
+        final Map<String, dynamic> p = (data['data'] != null)
+            ? Map<String, dynamic>.from(data['data'])
+            : Map<String, dynamic>.from(data);
+
+        // Robust Device ID extraction from JSON
+        final String incomingDeviceId =
+            (p['device_id'] ?? p['deviceId'] ?? data['device_id'] ?? '')
+                .toString();
+
+        // Activation logic:
+        // 1. Matches specific device topic
+        // 2. Matches current device ID (IMEI/ShortId)
+        // 3. Matches legacy/default 'Sustainabyte_testir' ID
+        final bool isMatchingDevice = isStatusTopic ||
+            (incomingDeviceId.isNotEmpty &&
+                incomingDeviceId.toLowerCase() == _deviceId.toLowerCase()) ||
+            incomingDeviceId == 'Sustainabyte_testir';
+
+        if (isMatchingDevice) {
+          // Efficiently reset watchdog by simply updating the timestamp
+          _lastMessageReceivedTime = DateTime.now();
 
           if (p['temp'] != null || p['current_temp'] != null) {
             _actualTemperature =
@@ -480,37 +507,93 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           }
           if (p['ac'] != null || p['ACStatus'] != null) {
             final acVal = (p['ac'] ?? p['ACStatus']).toString().toUpperCase();
-            if (!_isPowerCommandLock) {
-              _isPowerOn = (acVal == 'ON' || acVal == '1' || acVal == 'TRUE');
+            _isPowerCommandLock = false;
+            _isPowerOn = (acVal == 'ON' || acVal == '1' || acVal == 'TRUE');
+            hasChanges = true;
+          }
+
+          // STRICT GATING for WiFi/Online Status
+          // We strictly require an explicit status field in the JSON to maintain ACTIVE state.
+          final rawStatus =
+              p['status'] ?? p['Status'] ?? p['online'] ?? p['Online'];
+
+          if (rawStatus != null) {
+            final String stVal = rawStatus.toString().toUpperCase();
+            final bool wasOnline = _isOnline;
+            _isOnline = (stVal == 'ACTIVE' || stVal == 'ONLINE');
+
+            if (_isOnline != wasOnline) {
+              if (_isOnline) {
+                _inactiveStartTime = null;
+              } else {
+                _inactiveStartTime = DateTime.now();
+              }
+              hasChanges = true;
+              debugPrint(
+                  '📡 [MQTT] Status Updated: $_isOnline (Topic: $topic, ID: $incomingDeviceId)');
             }
-            hasChanges = true;
+          } else {
+            // "otherwise i want an inactive" - if status field is missing entirely, ensure it is inactive.
+            final bool wasOnline = _isOnline;
+            _isOnline = false;
+            if (_isOnline != wasOnline) {
+              _inactiveStartTime = DateTime.now();
+              hasChanges = true;
+              debugPrint(
+                  '📡 [MQTT] Status Updated: $_isOnline (Topic: $topic, ID: $incomingDeviceId) - Missing status field');
+            }
           }
-          if (p['online'] != null || p['status'] != null) {
-            final stVal = (p['online'] ?? p['status']).toString().toUpperCase();
-            _isOnline = (stVal == 'ONLINE' || stVal == 'TRUE' || stVal == '1');
-            hasChanges = true;
-          }
-          
-          // Schedule parsing from JSON
+
+          // Schedule parsing from JSON (now inside the device matching block)
           bool scheduleChanged = false;
-          if (p['sch_on1'] != null) { _scheduleOn1 = p['sch_on1'].toString(); scheduleChanged = true; }
-          if (p['sch_off1'] != null) { _scheduleOff1 = p['sch_off1'].toString(); scheduleChanged = true; }
-          if (p['sch_on2'] != null) { _scheduleOn2 = p['sch_on2'].toString(); scheduleChanged = true; }
-          if (p['sch_off2'] != null) { _scheduleOff2 = p['sch_off2'].toString(); scheduleChanged = true; }
-          if (p['sch_on3'] != null) { _scheduleOn3 = p['sch_on3'].toString(); scheduleChanged = true; }
-          if (p['sch_off3'] != null) { _scheduleOff3 = p['sch_off3'].toString(); scheduleChanged = true; }
-          if (p['lunch_on'] != null) { _lunchOn = p['lunch_on'].toString(); scheduleChanged = true; }
-          if (p['lunch_off'] != null) { _lunchOff = p['lunch_off'].toString(); scheduleChanged = true; }
+          if (p['sch_on1'] != null) {
+            _scheduleOn1 = p['sch_on1'].toString();
+            scheduleChanged = true;
+          }
+          if (p['sch_off1'] != null) {
+            _scheduleOff1 = p['sch_off1'].toString();
+            scheduleChanged = true;
+          }
+          if (p['sch_on2'] != null) {
+            _scheduleOn2 = p['sch_on2'].toString();
+            scheduleChanged = true;
+          }
+          if (p['sch_off2'] != null) {
+            _scheduleOff2 = p['sch_off2'].toString();
+            scheduleChanged = true;
+          }
+          if (p['sch_on3'] != null) {
+            _scheduleOn3 = p['sch_on3'].toString();
+            scheduleChanged = true;
+          }
+          if (p['sch_off3'] != null) {
+            _scheduleOff3 = p['sch_off3'].toString();
+            scheduleChanged = true;
+          }
+          if (p['lunch_on'] != null) {
+            _lunchOn = p['lunch_on'].toString();
+            scheduleChanged = true;
+          }
+          if (p['lunch_off'] != null) {
+            _lunchOff = p['lunch_off'].toString();
+            scheduleChanged = true;
+          }
 
           if (scheduleChanged) {
             hasChanges = true;
-            debugPrint('✅ [MQTT JSON] Mapped Schedules -> S1: $_scheduleOn1-$_scheduleOff1, S2: $_scheduleOn2-$_scheduleOff2, S3: $_scheduleOn3-$_scheduleOff3, Lunch: $_lunchOn-$_lunchOff');
+            debugPrint('✅ [MQTT JSON] Mapped Schedules for $incomingDeviceId');
           }
-        } catch (e) {
-          debugPrint('❌ Error parsing MQTT JSON: $e');
+        } else {
+          // Log background messages from other devices occasionally
+          if (DateTime.now().second % 60 == 0) {
+            debugPrint(
+                'ℹ️ [MQTT] Background message for: $incomingDeviceId (Active: $_deviceId)');
+          }
         }
+      } catch (e) {
+        debugPrint('❌ Error parsing MQTT JSON: $e');
       }
-
+    } else {
       // 1. Explicit Schedule & Lunch Parsing
       if (upperPayload.contains('SCH_ON1')) {
         _scheduleOn1 = _extractTime(payload);
@@ -567,31 +650,48 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       }
 
       // 3. Status & Power Matches
-      if (upperPayload == 'ON_SUCCESS' ||
-          upperPayload == 'STATUS_ON' ||
-          upperPayload.contains('AC:ON')) {
-        if (!_isPowerCommandLock) _isPowerOn = true;
-        hasChanges = true;
-      } else if (upperPayload == 'OFF_SUCCESS' ||
-          upperPayload == 'STATUS_OFF' ||
-          upperPayload.contains('AC:OFF')) {
-        if (!_isPowerCommandLock) _isPowerOn = false;
-        hasChanges = true;
-      } else if (upperPayload == 'ONLINE' ||
-          upperPayload == 'ACTIVE' ||
-          upperPayload.contains('STATUS:ACTIVE')) {
-        _isOnline = true;
-        _inactiveStartTime = null; // Clear inactive time when device comes back online
-        hasChanges = true;
-      } else if (upperPayload == 'OFFLINE' ||
-          upperPayload == 'INACTIVE' ||
-          upperPayload.contains('STATUS:INACTIVE')) {
-        _isOnline = false;
-        if (_inactiveStartTime == null) {
-          _inactiveStartTime = DateTime.now(); // Start tracking inactive time
+      final bool isTargetDeviceMessage = isStatusTopic ||
+          (payload.contains(_deviceId) && _deviceId.isNotEmpty) ||
+          payload.contains('Sustainabyte_testir');
+
+      if (isTargetDeviceMessage) {
+        _lastMessageReceivedTime = DateTime.now();
+        if (upperPayload == 'ON_SUCCESS' ||
+            upperPayload == 'STATUS_ON' ||
+            upperPayload.contains('AC:ON')) {
+          _isPowerCommandLock = false;
+          _isPowerOn = true;
+          hasChanges = true;
+        } else if (upperPayload == 'OFF_SUCCESS' ||
+            upperPayload == 'STATUS_OFF' ||
+            upperPayload.contains('AC:OFF')) {
+          _isPowerCommandLock = false;
+          _isPowerOn = false;
+          hasChanges = true;
+        } else if (upperPayload.contains('OFFLINE') ||
+            upperPayload.contains('INACTIVE')) {
+          final bool wasOnline = _isOnline;
+          _isOnline = false;
+          if (wasOnline != _isOnline) {
+            _inactiveStartTime = DateTime.now();
+            hasChanges = true;
+            debugPrint(
+                '📡 [MQTT String] Status Updated: $_isOnline (Payload: $payload)');
+          }
+        } else if (upperPayload.contains('ONLINE') ||
+            upperPayload.contains('ACTIVE')) {
+          final bool wasOnline = _isOnline;
+          _isOnline = true;
+          if (wasOnline != _isOnline) {
+            _inactiveStartTime = null;
+            hasChanges = true;
+            debugPrint(
+                '📡 [MQTT String] Status Updated: $_isOnline (Payload: $payload)');
+          }
         }
-        hasChanges = true;
-      } else if (upperPayload.startsWith('TEMP:')) {
+      }
+
+      if (upperPayload.startsWith('TEMP:')) {
         final valStr = upperPayload.split(':').last.trim();
         final val = double.tryParse(valStr);
         if (val != null) {
@@ -606,28 +706,40 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           hasChanges = true;
         }
       }
+    }
 
-      if (hasChanges) {
-        _lastUpdateTime = DateTime.now();
-        _tempHistory.add(_ChartData(DateTime.now(), _actualTemperature));
+    if (hasChanges) {
+      // Throttle UI updates, disk I/O, and data processing to avoid lag
+      final now = DateTime.now();
+      if (now.difference(_lastSetStateTime) >
+          const Duration(milliseconds: 200)) {
+        _lastSetStateTime = now;
+        _lastUpdateTime = now;
+
+        // 1. Process logs and history only when UI updates
+        _tempHistory.add(_ChartData(now, _actualTemperature));
         if (_tempHistory.length > 20) _tempHistory.removeAt(0);
 
         _recentLogs.insert(0, {
-          'time': DateTime.now().toString().split('.').first.split(' ').last,
+          'time': now.toString().split('.').first.split(' ').last,
           'temp': _actualTemperature.toStringAsFixed(1),
           'hum': _humidity,
           'ac': _isPowerOn ? 'ON' : 'OFF',
+          'online': _isOnline,
         });
         if (_recentLogs.length > 5) _recentLogs.removeLast();
 
+        // 2. Save to cache
         LocalCacheService.saveDeviceStatus(widget.systemShortId, {
           'temp': _actualTemperature,
           'hum': _humidity,
           'power': _isPowerOn,
-          'online': _isOnline,
+          // 'online' status is no longer cached to ensure it always starts as inactive on page load
         });
+
+        if (mounted) setState(() {});
       }
-    });
+    }
   }
 
   String _extractTime(String payload) {
@@ -667,11 +779,14 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   }
 
   String _getDeviceTopic(String type) {
-    // Unified topic ID as per user request
+    // Dynamically construct topic based on the selected device ID (IMEI/ShortId)
+    // Fallback to Sustainabyte_testir for compatibility with legacy hardware
+    final String id = _deviceId.isEmpty ? 'Sustainabyte_testir' : _deviceId;
     return 'testir/Sustainabyte_testir/$type';
   }
 
-  Future<void> _publishMqttCommand(String message, {String? topic, bool allowOffline = false}) async {
+  Future<void> _publishMqttCommand(String message,
+      {String? topic, bool allowOffline = false}) async {
     if (!_isOnline && !allowOffline) {
       _showOfflineWarning();
       return;
@@ -735,7 +850,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       }
     });
     Future.delayed(const Duration(seconds: 5), () {
-      if (mounted) setState(() => _isPowerCommandLock = false);
+      if (mounted && _isPowerCommandLock) {
+        setState(() => _isPowerCommandLock = false);
+      }
     });
   }
 
@@ -797,7 +914,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     final url =
         '${AppConfig.provisionBaseUrl}/mqtt/stream?companyid=$companyId&deviceId=$imei';
 
-    debugPrint('ðŸŒ [HTTP Stream] Connecting to: $url');
+    debugPrint('ðŸŒ  [HTTP Stream] Connecting to: $url');
 
     try {
       final client = http.Client();
@@ -821,7 +938,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             _parseAndMapData(line);
           },
           onError: (error) {
-            debugPrint('âŒ [HTTP Stream] Error: $error');
+            debugPrint('â Œ [HTTP Stream] Error: $error');
           },
           onDone: () {
             debugPrint('ðŸ”Œ [HTTP Stream] Stream closed');
@@ -833,13 +950,13 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         _pollTimer?.cancel();
       } else {
         debugPrint(
-            'âŒ [HTTP Stream] Connection failed: ${response.statusCode}');
+            'â Œ [HTTP Stream] Connection failed: ${response.statusCode}');
         if (mounted) {
           setState(() => _isTelemetryLoading = false);
         }
       }
     } catch (e) {
-      debugPrint('âŒ [HTTP Stream] Connection Exception: $e');
+      debugPrint('â Œ [HTTP Stream] Connection Exception: $e');
       if (mounted) {
         setState(() => _isTelemetryLoading = false);
       }
@@ -882,20 +999,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           if (newPowerOn != _isPowerOn) hasChanges = true;
         }
 
+        // Connection status updates from HTTP Stream disabled.
+        // All status logic is now centralized in _handleMqttTelemetry for consistency.
         bool newOnline = _isOnline;
-        if (payload['online'] != null ||
-            payload['status'] != null ||
-            payload['isActive'] != null) {
-          final val =
-              (payload['online'] ?? payload['status'] ?? payload['isActive'])
-                  .toString();
-          newOnline = val == 'true' ||
-              val == '1' ||
-              val == 'ONLINE' ||
-              val == 'Active' ||
-              val == 'ON';
-          if (newOnline != _isOnline) hasChanges = true;
-        }
 
         bool newAuto = _isAuto;
         if (payload['auto'] != null || payload['isAuto'] != null) {
@@ -935,104 +1041,133 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Scaffold(
-      backgroundColor:
-          isDark ? const Color(0xFF1B172E) : const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: Icon(
-            Icons.arrow_back_ios,
-            color: isDark ? Colors.white : const Color(0xFF1B172E),
-            size: 20,
+    return Listener(
+      onPointerDown: (_) => _messenger?.hideCurrentSnackBar(),
+      child: Scaffold(
+        backgroundColor:
+            isDark ? const Color(0xFF1B172E) : const Color(0xFFF8FAFC),
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: Icon(
+              Icons.arrow_back_ios,
+              color: isDark ? Colors.white : const Color(0xFF1B172E),
+              size: 20,
+            ),
+            onPressed: () => Navigator.pop(context),
           ),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              _selectedEquipmentName,
-              style: GoogleFonts.poppins(
-                color: isDark ? Colors.white : const Color(0xFF1B172E),
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            Text(
-              'ID: ${_deviceId.isEmpty ? 'testir' : _deviceId}',
-              style: GoogleFonts.poppins(
-                color: isDark ? Colors.white38 : Colors.black38,
-                fontSize: 9,
-                fontWeight: FontWeight.w500,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          if (_pulseController != null)
-            FadeTransition(
-              opacity: Tween(begin: 0.3, end: 1.0).animate(
-                CurvedAnimation(
-                  parent: _pulseController!,
-                  curve: Curves.easeInOut,
+          title: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _selectedEquipmentName,
+                style: GoogleFonts.poppins(
+                  color: isDark ? Colors.white : const Color(0xFF1B172E),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              child: IconButton(
-                onPressed: () => _showDataInsights(isDark),
-                icon: Icon(
-                  Icons.analytics_outlined,
-                  color: isDark
-                      ? const Color(0xFF6CC042)
-                      : const Color(0xFF10B981),
-                  size: 24,
-                ),
-                tooltip: 'Trends',
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'ID: ${_deviceId.isEmpty ? 'testir' : _deviceId}',
+                    style: GoogleFonts.poppins(
+                      color: isDark ? Colors.white38 : Colors.black38,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  if (!_isOnline && _inactiveTimeString != 'N/A') ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'OFFLINE • $_inactiveTimeString',
+                        style: GoogleFonts.poppins(
+                          color: Colors.redAccent,
+                          fontSize: 8,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-            )
-          else
-            const SizedBox(width: 48),
-          const SizedBox(width: 8),
-        ],
-        centerTitle: true,
-      ),
-      body: Stack(
-        children: [
-          SingleChildScrollView(
-            child: Column(
-              children: [
-                const SizedBox(height: 16),
-                _buildEquipmentTabs(isDark, colorScheme),
-                const SizedBox(height: 32), // Space between tabs and gauge
-                RepaintBoundary(
-                  child: _InteractiveThermostatGauge(
-                    setTemp: _setTemperature,
-                    actualTemp: _actualTemperature,
-                    isDark: isDark,
-                    colorScheme: colorScheme,
-                    onTempChanged: (val) {
-                      setState(() => _setTemperature = val);
-                      _publishMqttCommand('TEMP_CN:${val.toInt()}');
-                    },
-                    onClearTemp: () {
-                      setState(() => _setTemperature = 24.0);
-                      _publishMqttCommand('TEMP_CN:24');
-                    },
+            ],
+          ),
+          actions: [
+            if (_pulseController != null)
+              FadeTransition(
+                opacity: Tween(begin: 0.3, end: 1.0).animate(
+                  CurvedAnimation(
+                    parent: _pulseController!,
+                    curve: Curves.easeInOut,
                   ),
                 ),
-                const SizedBox(height: 32), // Space below gauge
-                _buildDetailStats(isDark, colorScheme),
-                const SizedBox(height: 40),
-              ],
+                child: IconButton(
+                  onPressed: () => _showDataInsights(isDark),
+                  icon: Icon(
+                    Icons.analytics_outlined,
+                    color: isDark
+                        ? const Color(0xFF6CC042)
+                        : const Color(0xFF10B981),
+                    size: 24,
+                  ),
+                  tooltip: 'Trends',
+                ),
+              )
+            else
+              const SizedBox(width: 48),
+            const SizedBox(width: 8),
+          ],
+          centerTitle: true,
+        ),
+        body: Stack(
+          children: [
+            SingleChildScrollView(
+              child: Column(
+                children: [
+                  const SizedBox(height: 16),
+                  _buildEquipmentTabs(isDark, colorScheme),
+                  const SizedBox(height: 32), // Space between tabs and gauge
+                  RepaintBoundary(
+                    child: _InteractiveThermostatGauge(
+                      setTemp: _setTemperature,
+                      actualTemp: _actualTemperature,
+                      isDark: isDark,
+                      isOnline: _isOnline,
+                      colorScheme: colorScheme,
+                      onTempChanged: (double val) {
+                        setState(() => _setTemperature = val);
+                        _publishMqttCommand('TEMP_CN:${val.toInt()}');
+                      },
+                      onClearTemp: () {
+                        setState(() => _setTemperature = 24.0);
+                        _publishMqttCommand('TEMP_CN:24');
+                      },
+                      onDisabledInteraction: _showOfflineWarning,
+                    ),
+                  ),
+                  const SizedBox(height: 32), // Space below gauge
+                  _buildDetailStats(isDark, colorScheme),
+                  const SizedBox(height: 40),
+                ],
+              ),
             ),
-          ),
-          if (_isLoadingEquipments || _isTelemetryLoading)
-            Positioned.fill(child: _buildFullPageSkeleton(isDark)),
-        ],
+            if (_isLoadingEquipments || _isTelemetryLoading)
+              Positioned.fill(child: _buildFullPageSkeleton(isDark)),
+          ],
+        ),
+        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
@@ -1155,35 +1290,37 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             ),
           ),
           const SizedBox(height: 16),
-          SizedBox(
-            height: 150,
-            child: SfCartesianChart(
-              margin: EdgeInsets.zero,
-              primaryXAxis: DateTimeAxis(isVisible: false),
-              primaryYAxis: NumericAxis(
-                isVisible: false,
-                minimum: 20,
-                maximum: 40,
-              ),
-              plotAreaBorderWidth: 0,
-              series: <CartesianSeries<_ChartData, DateTime>>[
-                SplineAreaSeries<_ChartData, DateTime>(
-                  dataSource: _tempHistory,
-                  xValueMapper: (_ChartData data, _) => data.time,
-                  yValueMapper: (_ChartData data, _) => data.temp,
-                  gradient: LinearGradient(
-                    colors: [
-                      const Color(0xFF6CC042).withOpacity(0.3),
-                      const Color(0xFF6CC042).withOpacity(0.0),
-                    ],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                  ),
-                  borderColor: const Color(0xFF6CC042),
-                  borderWidth: 2,
-                  animationDuration: 0,
+          RepaintBoundary(
+            child: SizedBox(
+              height: 150,
+              child: SfCartesianChart(
+                margin: EdgeInsets.zero,
+                primaryXAxis: DateTimeAxis(isVisible: false),
+                primaryYAxis: NumericAxis(
+                  isVisible: false,
+                  minimum: 20,
+                  maximum: 40,
                 ),
-              ],
+                plotAreaBorderWidth: 0,
+                series: <CartesianSeries<_ChartData, DateTime>>[
+                  SplineAreaSeries<_ChartData, DateTime>(
+                    dataSource: _tempHistory,
+                    xValueMapper: (_ChartData data, _) => data.time,
+                    yValueMapper: (_ChartData data, _) => data.temp,
+                    gradient: LinearGradient(
+                      colors: [
+                        const Color(0xFF6CC042).withOpacity(0.3),
+                        const Color(0xFF6CC042).withOpacity(0.0),
+                      ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ),
+                    borderColor: const Color(0xFF6CC042),
+                    borderWidth: 2,
+                    animationDuration: 0,
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -1284,9 +1421,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       orElse: () => {},
     );
 
-    debugPrint('ðŸ” DEBUGGING TRENDS NAVIGATION:');
+    debugPrint('ðŸ”  DEBUGGING TRENDS NAVIGATION:');
     debugPrint('ðŸ†” Selected Equipment ID: $_selectedEquipmentId');
-    debugPrint('ðŸ·ï¸ Selected Short ID: $_selectedEquipmentShortId');
+    debugPrint('ðŸ ·ï¸  Selected Short ID: $_selectedEquipmentShortId');
     debugPrint('ðŸ“± Device ID (IMEI): $_deviceId');
     debugPrint('ðŸ“¦ Full Equipment Data: $selectedData');
 
@@ -1769,10 +1906,10 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                   if (!_isOnline) {
                     debugPrint('🔄 [MQTT] User requested WiFi re-sync');
                     _setupPersistentMqtt();
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    _messenger?.showSnackBar(
                       const SnackBar(
                         content: Text('Re-syncing connection status...'),
-                        duration: Duration(seconds: 1),
+                        duration: Duration(seconds: 3),
                         behavior: SnackBarBehavior.floating,
                       ),
                     );
@@ -1812,21 +1949,38 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                 activeColor: const Color(0xFF8B5CF6),
                 isDark: isDark,
                 onTap: () {
-                  _showSchedulePicker(isDark);
+                  if (_isOnline) {
+                    _showSchedulePicker(isDark);
+                  } else {
+                    _showOfflineWarning();
+                  }
                 },
               ),
             ],
           ),
           const SizedBox(height: 32),
 
-          // 2. Status and Humidity Row (Side by Side below buttons)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(child: _buildStatusCard(isDark)),
-              if (_isOnline) const SizedBox(width: 12),
-              if (_isOnline) Expanded(child: _buildHumidityCard(isDark)),
-            ],
+          // 2. Status and Humidity (Responsive Row/Column)
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth < 340) {
+                return Column(
+                  children: [
+                    _buildStatusCard(isDark),
+                    if (_isOnline) const SizedBox(height: 12),
+                    if (_isOnline) _buildHumidityCard(isDark),
+                  ],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(child: _buildStatusCard(isDark)),
+                  if (_isOnline) const SizedBox(width: 12),
+                  if (_isOnline) Expanded(child: _buildHumidityCard(isDark)),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 24),
 
@@ -2100,61 +2254,66 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   }
 
   Widget _buildScheduleSection(bool isDark) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF26213A) : Colors.white,
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(
-          color:
-              isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFE2E8F0),
-        ),
-        boxShadow: [
-          if (!isDark)
-            BoxShadow(
-              color: const Color(0xFF0F172A).withOpacity(0.05),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF8B5CF6).withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.schedule_rounded,
-                    color: Color(0xFF8B5CF6), size: 18),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                'Daily Schedule',
-                style: GoogleFonts.outfit(
-                  color: isDark ? Colors.white : Colors.black,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const Spacer(),
-              if (_isAuto) _buildAutoBadge(),
-            ],
+    return GestureDetector(
+      onTap: () => _showSchedulePicker(isDark),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF26213A) : Colors.white,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withOpacity(0.05)
+                : const Color(0xFFE2E8F0),
           ),
-          const SizedBox(height: 20),
-          _buildScheduleItem('Schedule 1', _scheduleOn1, _scheduleOff1,
-              const Color(0xFF6CC042), isDark),
-          const SizedBox(height: 12),
-          _buildScheduleItem('Schedule 2', _scheduleOn2, _scheduleOff2,
-              const Color(0xFF3B82F6), isDark),
-          const SizedBox(height: 12),
-          _buildScheduleItem('Schedule 3', _scheduleOn3, _scheduleOff3,
-              const Color(0xFFF59E0B), isDark),
-        ],
+          boxShadow: [
+            if (!isDark)
+              BoxShadow(
+                color: const Color(0xFF0F172A).withOpacity(0.05),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B5CF6).withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.schedule_rounded,
+                      color: Color(0xFF8B5CF6), size: 18),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Daily Schedule',
+                  style: GoogleFonts.outfit(
+                    color: isDark ? Colors.white : Colors.black,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                if (_isAuto) _buildAutoBadge(),
+              ],
+            ),
+            const SizedBox(height: 20),
+            _buildScheduleItem('Schedule 1', _scheduleOn1, _scheduleOff1,
+                const Color(0xFF6CC042), isDark),
+            const SizedBox(height: 12),
+            _buildScheduleItem('Schedule 2', _scheduleOn2, _scheduleOff2,
+                const Color(0xFF3B82F6), isDark),
+            const SizedBox(height: 12),
+            _buildScheduleItem('Schedule 3', _scheduleOn3, _scheduleOff3,
+                const Color(0xFFF59E0B), isDark),
+          ],
+        ),
       ),
     );
   }
@@ -2191,10 +2350,15 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               ),
               const SizedBox(height: 4),
               Text(
-                isActive ? 'Running' : 'Not Set',
+                isActive ? 'Running' : 'Inactive',
                 style: GoogleFonts.outfit(
-                  color: isDark ? Colors.white38 : Colors.black38,
-                  fontSize: 12,
+                  color: isActive
+                      ? (isDark ? Colors.white38 : Colors.black38)
+                      : (isDark
+                          ? Colors.white.withOpacity(0.1)
+                          : Colors.black12),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w400,
                 ),
               ),
             ],
@@ -2210,39 +2374,69 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
   Widget _timeChip(String label, String time, Color? activeColor, bool isDark) {
     final isActive = activeColor != null;
+    final bool isActuallySet =
+        time != '--:--' && time.toUpperCase() != 'DISABLED';
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: isActive
-            ? activeColor.withOpacity(0.1)
+            ? activeColor.withOpacity(0.12)
             : (isDark
-                ? Colors.white.withOpacity(0.05)
-                : Colors.grey.withOpacity(0.1)),
-        borderRadius: BorderRadius.circular(12),
+                ? Colors.white.withOpacity(0.02)
+                : Colors.grey.withOpacity(0.03)),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isActive ? activeColor.withOpacity(0.3) : Colors.transparent,
+          color: isActive
+              ? activeColor.withOpacity(0.3)
+              : (isDark
+                  ? Colors.white.withOpacity(0.05)
+                  : Colors.black.withOpacity(0.03)),
+          width: 1,
         ),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             label,
             style: GoogleFonts.outfit(
               color: isActive
                   ? activeColor
-                  : (isDark ? Colors.white24 : Colors.black26),
+                  : (isDark ? Colors.white10 : Colors.black12),
               fontSize: 8,
-              fontWeight: FontWeight.bold,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.2,
             ),
           ),
-          Text(
-            time,
-            style: GoogleFonts.outfit(
-              color: isActive
-                  ? (isDark ? Colors.white : Colors.black87)
-                  : (isDark ? Colors.white12 : Colors.black12),
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
+          const SizedBox(height: 4),
+          if (!isActuallySet)
+            Icon(
+              Icons.timer_off_outlined,
+              size: 12,
+              color: isDark
+                  ? Colors.white.withOpacity(0.05)
+                  : Colors.black.withOpacity(0.05),
+            )
+          else
+            const SizedBox(height: 12), // Spacer to maintain height
+          const SizedBox(height: 2),
+          ImageFiltered(
+            imageFilter: !isActuallySet
+                ? ImageFilter.blur(sigmaX: 1.5, sigmaY: 1.5)
+                : ImageFilter.blur(sigmaX: 0, sigmaY: 0),
+            child: Text(
+              isActuallySet ? time : '-- : --',
+              style: GoogleFonts.outfit(
+                color: isActive
+                    ? (isDark ? Colors.white : Colors.black87)
+                    : (isDark
+                        ? Colors.white.withOpacity(0.08)
+                        : Colors.black.withOpacity(0.1)),
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.5,
+              ),
             ),
           ),
         ],
@@ -2252,95 +2446,100 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
   Widget _buildLunchSection(bool isDark) {
     final bool isActive = _lunchOn != '--:--' && _lunchOff != '--:--';
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF26213A) : Colors.white,
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(
-          color:
-              isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFE2E8F0),
+    return GestureDetector(
+      onTap: () => _showSchedulePicker(isDark),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF26213A) : Colors.white,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withOpacity(0.05)
+                : const Color(0xFFE2E8F0),
+          ),
+          boxShadow: [
+            if (!isDark)
+              BoxShadow(
+                color: const Color(0xFF0F172A).withOpacity(0.05),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+          ],
         ),
-        boxShadow: [
-          if (!isDark)
-            BoxShadow(
-              color: const Color(0xFF0F172A).withOpacity(0.05),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.restaurant_rounded,
-                    color: Colors.orange, size: 18),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                'Lunch Schedule',
-                style: GoogleFonts.outfit(
-                  color: isDark ? Colors.white : Colors.black,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const Spacer(),
-              if (isActive)
+        child: Column(
+          children: [
+            Row(
+              children: [
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
                     color: Colors.orange.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
+                    shape: BoxShape.circle,
                   ),
-                  child: Text(
-                    '1H DURATION',
-                    style: GoogleFonts.outfit(
-                      color: Colors.orange,
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  child: const Icon(Icons.restaurant_rounded,
+                      color: Colors.orange, size: 18),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Lunch Schedule',
+                  style: GoogleFonts.outfit(
+                    color: isDark ? Colors.white : Colors.black,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withOpacity(0.03)
-                  : Colors.grey.withOpacity(0.05),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: isActive
-                    ? Colors.orange.withOpacity(0.2)
-                    : Colors.transparent,
-              ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _lunchTimeItem('BREAK START', _lunchOn, isDark),
-                Container(
-                    width: 1,
-                    height: 30,
-                    color: isDark
-                        ? Colors.white.withAlpha(26)
-                        : Colors.black.withAlpha(26)),
-                _lunchTimeItem('BREAK END', _lunchOff, isDark),
+                const Spacer(),
+                if (isActive)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '1H DURATION',
+                      style: GoogleFonts.outfit(
+                        color: Colors.orange,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
               ],
             ),
-          ),
-        ],
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.white.withOpacity(0.03)
+                    : Colors.grey.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isActive
+                      ? Colors.orange.withOpacity(0.2)
+                      : Colors.transparent,
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _lunchTimeItem('BREAK START', _lunchOn, isDark),
+                  Container(
+                      width: 1,
+                      height: 30,
+                      color: isDark
+                          ? Colors.white.withAlpha(26)
+                          : Colors.black.withAlpha(26)),
+                  _lunchTimeItem('BREAK END', _lunchOff, isDark),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2394,16 +2593,19 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   void _showSchedulePicker(bool isDark) {
     showDialog(
       context: context,
-      builder: (context) => _ScheduleControlDialog(
-        isDark: isDark,
-        schedules: [
-          {'on': _scheduleOn1, 'off': _scheduleOff1},
-          {'on': _scheduleOn2, 'off': _scheduleOff2},
-          {'on': _scheduleOn3, 'off': _scheduleOff3},
-        ],
-        lunch: {'on': _lunchOn, 'off': _lunchOff},
-        onCommand: (type, index, time) =>
-            _publishMqttSchedule(type, index, time),
+      builder: (context) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: _ScheduleControlDialog(
+          isDark: isDark,
+          schedules: [
+            {'on': _scheduleOn1, 'off': _scheduleOff1},
+            {'on': _scheduleOn2, 'off': _scheduleOff2},
+            {'on': _scheduleOn3, 'off': _scheduleOff3},
+          ],
+          lunch: {'on': _lunchOn, 'off': _lunchOff},
+          onCommand: (type, index, time) =>
+              _publishMqttSchedule(type, index, time),
+        ),
       ),
     );
   }
@@ -2457,34 +2659,80 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
     String payloadStr = '';
     if (type == 'SCH_CLEAR_ALL') {
-      payloadStr = 'SCH_CLEAR_LUNCH';
+      payloadStr = 'SCH_CLEAR';
     } else if (type == 'SCH_CLEAR') {
-      payloadStr = index <= 3 ? 'SCH_CLEAR$index' : 'SCH_CLEAR';
+      payloadStr = index <= 3 ? 'SCH_CLEAR$index' : 'SCH_CLEAR_LUNCH';
     } else {
-      payloadStr = '${type}${index <= 3 ? index : ''}:$time';
+      payloadStr = '$type${index <= 3 ? index : ''}:$time';
     }
 
     // Publish to daily schedule topic using unified topic generator
-    _publishMqttCommand(payloadStr, topic: _getDeviceTopic('schedule'), allowOffline: true);
+    _publishMqttCommand(payloadStr,
+        topic: _getDeviceTopic('schedule'), allowOffline: true);
   }
 
   void _showOfflineWarning() {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
+
+    // Only show if this route is currently active to prevent it showing "outside"
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return;
+
+    _messenger?.hideCurrentSnackBar();
+    _messenger?.showSnackBar(
       SnackBar(
         content: Row(
           children: [
-            const Icon(Icons.wifi_off_rounded, color: Colors.white),
-            const SizedBox(width: 12),
-            Text('Device is Offline',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEF4444).withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.wifi_off_rounded,
+                  color: Color(0xFFEF4444), size: 18),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Connection Lost',
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        color: Colors.white,
+                        letterSpacing: -0.3,
+                      )),
+                  Text('Device is currently unreachable',
+                      style: GoogleFonts.outfit(
+                        fontSize: 12,
+                        color: Colors.white60,
+                        fontWeight: FontWeight.w400,
+                      )),
+                ],
+              ),
+            ),
           ],
         ),
-        backgroundColor: Colors.redAccent,
+        backgroundColor: const Color(0xFF1B172E),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        elevation: 10,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(
+              color: const Color(0xFFEF4444).withOpacity(0.2), width: 1.5),
+        ),
+        margin: const EdgeInsets.fromLTRB(20, 0, 20, 30),
+        action: SnackBarAction(
+          label: 'RE-SYNC',
+          textColor: const Color(0xFFEF4444),
+          onPressed: () {
+            _setupPersistentMqtt();
+          },
+        ),
       ),
     );
   }
@@ -3152,12 +3400,14 @@ class _DeviceControlPage extends StatefulWidget {
   final double initialTemp;
   final double actualTemp;
   final bool isDark;
+  final bool isOnline;
 
   const _DeviceControlPage({
     required this.equipmentName,
     required this.initialTemp,
     required this.actualTemp,
     required this.isDark,
+    required this.isOnline,
   });
 
   @override
@@ -3228,6 +3478,7 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
               setTemp: _setTemp,
               actualTemp: _actualTemp,
               isDark: isDark,
+              isOnline: widget.isOnline,
               colorScheme: colorScheme,
               onTempChanged: (newTemp) {
                 setState(() => _setTemp = newTemp);
@@ -3237,6 +3488,16 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
               onClearTemp: () {
                 setState(() => _setTemp = 0.0);
                 // _publishMqttCommand('TEMP_CLEAR');
+              },
+              onDisabledInteraction: () {
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Device is Offline - Check Connection'),
+                    behavior: SnackBarBehavior.floating,
+                    duration: Duration(seconds: 2),
+                  ),
+                );
               },
             ),
             const SizedBox(height: 10),
@@ -3544,42 +3805,6 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
     );
   }
 
-  Future<void> _selectTime(bool isSchedule, bool isStart) async {
-    _showSchedulePicker(widget.isDark);
-  }
-
-  void _showSchedulePicker(bool isDark) {
-    showDialog(
-      context: context,
-      builder: (context) => _ScheduleControlDialog(
-        isDark: isDark,
-        schedules: [
-          {'on': _scheduleOn1, 'off': _scheduleOff1},
-          {'on': '--:--', 'off': '--:--'},
-          {'on': '--:--', 'off': '--:--'},
-        ],
-        lunch: {'on': _lunchOn, 'off': _lunchOff},
-        onCommand: (type, index, time) {
-          setState(() {
-            if (type == 'SCH_ON' && index == 1) _scheduleOn1 = time;
-            if (type == 'SCH_OFF' && index == 1) _scheduleOff1 = time;
-            if (type == 'LUNCH_ON') _lunchOn = time;
-            if (type == 'LUNCH_OFF') _lunchOff = time;
-            if (type == 'SCH_CLEAR') {
-              if (index == 1) {
-                _scheduleOn1 = '--:--';
-                _scheduleOff1 = '--:--';
-              } else if (index == 4) {
-                _lunchOn = '--:--';
-                _lunchOff = '--:--';
-              }
-            }
-          });
-        },
-      ),
-    );
-  }
-
   String _formatDisplayTime(String time) {
     if (time == '--:--' || time.isEmpty || !time.contains(':')) return '--:--';
     try {
@@ -3592,6 +3817,58 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
       return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
     } catch (e) {
       return '--:--';
+    }
+  }
+
+  void _showSchedulePicker(bool isDark) {
+    showDialog(
+      context: context,
+      builder: (context) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: _ScheduleControlDialog(
+          isDark: isDark,
+          schedules: [
+            {'on': _scheduleOn1, 'off': _scheduleOff1},
+            {'on': '--:--', 'off': '--:--'},
+            {'on': '--:--', 'off': '--:--'},
+          ],
+          lunch: {'on': _lunchOn, 'off': _lunchOff},
+          onCommand: (type, index, time) =>
+              _publishMqttSchedule(type, index, time),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _publishMqttSchedule(
+      String type, int index, String? time) async {
+    if (mounted) {
+      setState(() {
+        if (type == 'SCH_ON') {
+          if (index == 1) _scheduleOn1 = time!;
+        }
+        if (type == 'SCH_OFF') {
+          if (index == 1) _scheduleOff1 = time!;
+        }
+        if (type == 'LUNCH_ON') _lunchOn = time!;
+        if (type == 'LUNCH_OFF') _lunchOff = time!;
+        if (type == 'SCH_CLEAR') {
+          if (index == 1) {
+            _scheduleOn1 = '--:--';
+            _scheduleOff1 = '--:--';
+          }
+          if (index == 4) {
+            _lunchOn = '--:--';
+            _lunchOff = '--:--';
+          }
+        }
+        if (type == 'SCH_CLEAR_ALL') {
+          _scheduleOn1 = '--:--';
+          _scheduleOff1 = '--:--';
+          _lunchOn = '--:--';
+          _lunchOff = '--:--';
+        }
+      });
     }
   }
 }
@@ -3838,18 +4115,23 @@ class _InteractiveThermostatGauge extends StatelessWidget {
   final double setTemp;
   final double actualTemp;
   final bool isDark;
+  final bool isOnline;
   final ColorScheme colorScheme;
   final ValueChanged<double> onTempChanged;
   final VoidCallback? onClearTemp;
+  final VoidCallback? onDisabledInteraction;
 
   const _InteractiveThermostatGauge({
+    Key? key,
     required this.setTemp,
     required this.actualTemp,
     required this.isDark,
+    required this.isOnline,
     required this.colorScheme,
     required this.onTempChanged,
     this.onClearTemp,
-  });
+    this.onDisabledInteraction,
+  }) : super(key: key);
 
   Color _getColorForTemp(double temp) {
     if (temp <= 19) return const Color(0xFFEF4444); // Blue
@@ -3860,6 +4142,10 @@ class _InteractiveThermostatGauge extends StatelessWidget {
   }
 
   void _handlePan(Offset localPosition, Size size) {
+    if (!isOnline) {
+      onDisabledInteraction?.call();
+      return;
+    }
     final center = Offset(size.width / 2, size.height / 2);
     final dx = localPosition.dx - center.dx;
     final dy = localPosition.dy - center.dy;
@@ -3891,7 +4177,7 @@ class _InteractiveThermostatGauge extends StatelessWidget {
   Widget build(BuildContext context) {
     final activeColor = _getColorForTemp(setTemp);
     // Calculate gauge size to fill available width
-    final screenWidth = MediaQuery.sizeOf(context).width;
+    final screenWidth = MediaQuery.of(context).size.width;
     const buttonSize = 44.0;
     const gap = 8.0;
     final gaugeSize =
@@ -3906,125 +4192,142 @@ class _InteractiveThermostatGauge extends StatelessWidget {
         // Minus Button
         _buildSideControl(
           icon: Icons.remove,
-          onTap: () => onTempChanged((setTemp - 1).clamp(16.0, 30.0)),
-          color: activeColor,
+          onTap: isOnline
+              ? () => onTempChanged((setTemp - 1).clamp(16.0, 30.0))
+              : onDisabledInteraction,
+          color: isOnline ? activeColor : Colors.grey,
           size: buttonSize,
+          isDisabled: false, // Keep clickable for feedback
         ),
-        const SizedBox(width: gap),
+        SizedBox(width: gap),
         // Gauge — fills available screen width
-        Container(
-          width: gaugeSize,
-          height: gaugeSize,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            boxShadow: [
-              if (isDark)
-                BoxShadow(
-                  color: activeColor.withOpacity(0.15),
-                  blurRadius: 16, // Reduced from 48 for much better performance
-                  spreadRadius: 4,
-                ),
-            ],
-          ),
-          child: CustomPaint(
-            size: Size(gaugeSize, gaugeSize),
-            painter: _InteractiveThermostatPainter(
-              setTemp: setTemp,
-              actualTemp: actualTemp,
-              isDark: isDark,
-              colorScheme: colorScheme,
+        GestureDetector(
+          onPanUpdate: (details) =>
+              _handlePan(details.localPosition, Size(gaugeSize, gaugeSize)),
+          onTapDown: (details) =>
+              _handlePan(details.localPosition, Size(gaugeSize, gaugeSize)),
+          child: Container(
+            width: gaugeSize,
+            height: gaugeSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                if (isDark && isOnline)
+                  BoxShadow(
+                    color: activeColor.withOpacity(0.15),
+                    blurRadius: 16,
+                    spreadRadius: 4,
+                  ),
+              ],
             ),
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'ACTUAL',
-                    style: GoogleFonts.poppins(
-                      color: (isDark ? Colors.white : colorScheme.primary)
-                          .withOpacity(0.4),
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 2,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${actualTemp.toStringAsFixed(1)}\u00b0C',
-                    style: GoogleFonts.poppins(
-                      color: isDark ? Colors.white : const Color(0xFF1B172E),
-                      fontSize: fontSize,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: activeColor.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: activeColor.withOpacity(0.3),
+            child: CustomPaint(
+              size: Size(gaugeSize, gaugeSize),
+              painter: _InteractiveThermostatPainter(
+                setTemp: setTemp,
+                actualTemp: actualTemp,
+                isDark: isDark,
+                colorScheme: colorScheme,
+              ),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      isOnline ? 'ACTUAL' : 'OFFLINE',
+                      style: GoogleFonts.poppins(
+                        color: (isOnline
+                                ? (isDark ? Colors.white : colorScheme.primary)
+                                : Colors.redAccent)
+                            .withOpacity(0.4),
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 2,
                       ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'SET TEMP',
-                          style: GoogleFonts.poppins(
-                            color: activeColor,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1.0,
-                          ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${actualTemp.toStringAsFixed(1)}\u00b0C',
+                      style: GoogleFonts.poppins(
+                        color: isDark ? Colors.white : const Color(0xFF1B172E),
+                        fontSize: fontSize,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: (isOnline ? activeColor : Colors.grey)
+                            .withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: (isOnline ? activeColor : Colors.grey)
+                              .withOpacity(0.3),
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${setTemp.toInt()}\u00b0C',
-                          style: GoogleFonts.poppins(
-                            color:
-                                isDark ? Colors.white : const Color(0xFF1B172E),
-                            fontSize: 14,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        if (onClearTemp != null) ...[
-                          const SizedBox(width: 6),
-                          GestureDetector(
-                            onTap: onClearTemp,
-                            child: Container(
-                              padding: const EdgeInsets.all(2),
-                              decoration: BoxDecoration(
-                                color: activeColor.withOpacity(0.2),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                Icons.close_rounded,
-                                color: activeColor,
-                                size: 10,
-                              ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'SET TEMP',
+                            style: GoogleFonts.poppins(
+                              color: isOnline ? activeColor : Colors.grey,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.0,
                             ),
                           ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${setTemp.toInt()}\u00b0C',
+                            style: GoogleFonts.poppins(
+                              color: isDark
+                                  ? Colors.white
+                                  : const Color(0xFF1B172E),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          if (onClearTemp != null && isOnline) ...[
+                            const SizedBox(width: 6),
+                            GestureDetector(
+                              onTap: onClearTemp,
+                              child: Container(
+                                padding: const EdgeInsets.all(2),
+                                decoration: BoxDecoration(
+                                  color: activeColor.withOpacity(0.2),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.close_rounded,
+                                  color: activeColor,
+                                  size: 10,
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
         ),
-        const SizedBox(width: gap),
+        SizedBox(width: gap),
         // Plus Button
         _buildSideControl(
           icon: Icons.add,
-          onTap: () => onTempChanged((setTemp + 1).clamp(16.0, 30.0)),
-          color: activeColor,
+          onTap: isOnline
+              ? () => onTempChanged((setTemp + 1).clamp(16.0, 30.0))
+              : onDisabledInteraction,
+          color: isOnline ? activeColor : Colors.grey,
           size: buttonSize,
+          isDisabled: false, // Keep clickable for feedback
         ),
       ],
     );
@@ -4032,14 +4335,16 @@ class _InteractiveThermostatGauge extends StatelessWidget {
 
   Widget _buildSideControl({
     required IconData icon,
-    required VoidCallback onTap,
+    VoidCallback? onTap,
     required Color color,
     double size = 52,
+    bool isDisabled = false,
   }) {
     // Auto-color: green for +, red for −
     final isPlus = icon == Icons.add || icon == Icons.add_rounded;
-    final accentColor =
-        isPlus ? const Color(0xFF6CC042) : const Color(0xFFEF4444);
+    final accentColor = isDisabled
+        ? Colors.white10
+        : (isPlus ? const Color(0xFF6CC042) : const Color(0xFFEF4444));
 
     return GestureDetector(
       onTap: onTap,
@@ -4051,12 +4356,12 @@ class _InteractiveThermostatGauge extends StatelessWidget {
           color: const Color(0xFF1B172E),
           shape: BoxShape.circle,
           border: Border.all(
-            color: Colors.white.withAlpha(50),
+            color: Colors.white.withOpacity(0.2),
             width: 1.5,
           ),
           boxShadow: [
             BoxShadow(
-              color: accentColor.withAlpha(70),
+              color: accentColor.withOpacity(0.3),
               blurRadius: 16,
               spreadRadius: 2,
             ),
@@ -4265,9 +4570,10 @@ class _ScheduleControlDialog extends StatefulWidget {
 }
 
 class _ScheduleControlDialogState extends State<_ScheduleControlDialog> {
-  // Local mutable copies so the UI updates immediately on pick
   late List<Map<String, String>> _localSchedules;
   late Map<String, String> _localLunch;
+  int _activeTab = 0; // 0: Daily, 1: Lunch
+  bool _isPickerOpen = false;
 
   @override
   void initState() {
@@ -4278,42 +4584,38 @@ class _ScheduleControlDialogState extends State<_ScheduleControlDialog> {
   }
 
   void _handleCommand(String type, int index, String time) {
-    // 1. Update local state so the dialog refreshes immediately
     setState(() {
       if (type == 'SCH_ON' && index >= 1 && index <= 3) {
         _localSchedules[index - 1]['on'] = time;
-      }
-      if (type == 'SCH_OFF' && index >= 1 && index <= 3) {
+      } else if (type == 'SCH_OFF' && index >= 1 && index <= 3) {
         _localSchedules[index - 1]['off'] = time;
-      }
-      if (type == 'LUNCH_ON') _localLunch['on'] = time;
-      if (type == 'LUNCH_OFF') _localLunch['off'] = time;
-      if (type == 'SCH_CLEAR') {
+      } else if (type == 'LUNCH_ON') {
+        _localLunch['on'] = time;
+      } else if (type == 'LUNCH_OFF') {
+        _localLunch['off'] = time;
+      } else if (type == 'SCH_CLEAR') {
         if (index >= 1 && index <= 3) {
           _localSchedules[index - 1]['on'] = '--:--';
           _localSchedules[index - 1]['off'] = '--:--';
-        }
-        if (index == 4) {
+        } else if (index == 4) {
           _localLunch['on'] = '--:--';
           _localLunch['off'] = '--:--';
         }
       }
     });
-    // 2. Forward to parent (updates parent state + publishes MQTT)
-    widget.onCommand(type, index, time);
+    // Optimistic update done locally, now trigger the command
+    Future.microtask(() => widget.onCommand(type, index, time));
   }
 
   void _handleClearAll() {
-    // Reset all local state
     setState(() {
-      for (int i = 0; i < _localSchedules.length; i++) {
-        _localSchedules[i]['on'] = '--:--';
-        _localSchedules[i]['off'] = '--:--';
+      for (var s in _localSchedules) {
+        s['on'] = '--:--';
+        s['off'] = '--:--';
       }
       _localLunch['on'] = '--:--';
       _localLunch['off'] = '--:--';
     });
-    // Forward to parent with a single MQTT command
     widget.onCommand('SCH_CLEAR_ALL', 0, '');
   }
 
@@ -4322,159 +4624,208 @@ class _ScheduleControlDialogState extends State<_ScheduleControlDialog> {
     return Center(
       child: Material(
         color: Colors.transparent,
-        child: Container(
-          width: MediaQuery.of(context).size.width * 0.9,
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.8,
-          ),
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1B172E),
-            borderRadius: BorderRadius.circular(32),
-            border: Border.all(
-              color: const Color(0xFF6CC042).withOpacity(0.2),
-              width: 1.5,
+        child: RepaintBoundary(
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.88,
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.8,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.5),
-                blurRadius: 40,
-                offset: const Offset(0, 20),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Schedule Manager",
-                        style: GoogleFonts.poppins(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      Text(
-                        "Manage all timings in one place",
-                        style: GoogleFonts.poppins(
-                          color: Colors.white38,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF6CC042).withOpacity(0.1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.calendar_month_rounded,
-                      color: Color(0xFF6CC042),
-                      size: 20,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              Flexible(
-                child: ListView(
-                  shrinkWrap: true,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+            decoration: BoxDecoration(
+              color: const Color(0xFF131122),
+              borderRadius: BorderRadius.circular(28),
+              border:
+                  Border.all(color: Colors.white.withOpacity(0.08), width: 1.2),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.4),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    for (int i = 0; i < _localSchedules.length; i++)
-                      _buildScheduleSlot(
-                        context,
-                        "DAILY SCHEDULE ${i + 1}",
-                        _localSchedules[i]['on']!,
-                        _localSchedules[i]['off']!,
-                        i + 1,
-                        false,
-                        i == 0
-                            ? const Color(0xFF6CC042)
-                            : i == 1
-                                ? const Color(0xFF3B82F6)
-                                : const Color(0xFFF59E0B),
-                      ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 8.0),
-                      child: Divider(color: Colors.white10, height: 1),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Schedule Manager",
+                          style: GoogleFonts.outfit(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: -0.4,
+                          ),
+                        ),
+                        Text(
+                          "Optimize your device timings",
+                          style: GoogleFonts.outfit(
+                            color: Colors.white38,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
-                    _buildScheduleSlot(
-                      context,
-                      "LUNCH BREAK",
-                      _localLunch['on']!,
-                      _localLunch['off']!,
-                      4,
-                      true,
-                      const Color(0xFFEF4444),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF6CC042).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: const Color(0xFF6CC042).withOpacity(0.2)),
+                      ),
+                      child: const Icon(Icons.calendar_month_rounded,
+                          color: Color(0xFF6CC042), size: 18),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 16),
-              // Clear All Schedules Button
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: _handleClearAll,
-                  icon: const Icon(Icons.delete_sweep_rounded, size: 18),
-                  label: Text(
-                    "CLEAR ALL SCHEDULES",
-                    style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      letterSpacing: 0.5,
-                    ),
+                const SizedBox(height: 24),
+
+                // Tab Selector
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.03),
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.redAccent,
-                    side: BorderSide(color: Colors.redAccent.withOpacity(0.4)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
+                  child: Row(
+                    children: [
+                      _buildTabButton("Daily Blocks", 0),
+                      _buildTabButton("Lunch Breaks", 1),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.45,
+                  ),
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_activeTab == 0) ...[
+                          // Daily Schedules
+                          for (int i = 0; i < _localSchedules.length; i++)
+                            _buildSlot(
+                              context,
+                              "DAILY SCHEDULE ${i + 1}",
+                              _localSchedules[i]['on']!,
+                              _localSchedules[i]['off']!,
+                              i + 1,
+                              false,
+                              [
+                                const Color(0xFF6CC042),
+                                const Color(0xFF3B82F6),
+                                const Color(0xFFF59E0B)
+                              ][i],
+                            ),
+                        ] else ...[
+                          // Lunch Break
+                          _buildSlot(
+                            context,
+                            "LUNCH BREAK",
+                            _localLunch['on']!,
+                            _localLunch['off']!,
+                            4,
+                            true,
+                            const Color(0xFFEF4444),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(context),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF6CC042),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
+                const SizedBox(height: 16),
+
+                Column(
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _handleClearAll,
+                      icon: const Icon(Icons.delete_outline_rounded, size: 16),
+                      label: const Text("CLEAR ALL"),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor:
+                            const Color(0xFFEF4444).withOpacity(0.7),
+                        side: BorderSide.none,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        minimumSize: const Size(double.infinity, 44),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
                     ),
-                    elevation: 0,
-                  ),
-                  child: Text(
-                    "SAVE",
-                    style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1,
+                    const SizedBox(height: 10),
+                    ElevatedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF6CC042),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        minimumSize: const Size(double.infinity, 52),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: Text(
+                        "SAVE CHANGES",
+                        style: GoogleFonts.outfit(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            letterSpacing: 0.5),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildScheduleSlot(
+  Widget _buildTabButton(String label, int index) {
+    final bool isActive = _activeTab == index;
+    return Expanded(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => setState(() => _activeTab = index),
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: isActive
+                  ? Colors.white.withOpacity(0.05)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Center(
+              child: Text(
+                label,
+                style: GoogleFonts.outfit(
+                  color: isActive ? const Color(0xFF6CC042) : Colors.white24,
+                  fontSize: 13,
+                  fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSlot(
     BuildContext context,
     String label,
     String on,
@@ -4483,87 +4834,70 @@ class _ScheduleControlDialogState extends State<_ScheduleControlDialog> {
     bool isLunch,
     Color color,
   ) {
-    final bool isActive = on != '--:--' && off != '--:--';
-
+    final bool isActive = on != '--:--' || off != '--:--';
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.03),
+        color: Colors.white.withOpacity(0.015),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: isActive
-              ? color.withOpacity(0.3)
-              : Colors.white.withOpacity(0.05),
+              ? color.withOpacity(0.1)
+              : Colors.white.withOpacity(0.03),
+          width: 1.0,
         ),
-        boxShadow: isActive
-            ? [
-                BoxShadow(
-                  color: color.withOpacity(0.05),
-                  blurRadius: 15,
-                  spreadRadius: 2,
-                )
-              ]
-            : null,
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Card Header
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Container(
-                    width: 3,
-                    height: 14,
-                    decoration: BoxDecoration(
-                      color: color,
-                      borderRadius: BorderRadius.circular(2),
-                      boxShadow: [
-                        BoxShadow(
-                          color: color.withOpacity(0.5),
-                          blurRadius: 4,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    label,
-                    style: GoogleFonts.poppins(
-                      color: color,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ],
+              Container(
+                width: 2.5,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: GoogleFonts.outfit(
+                  color: isActive ? color.withOpacity(0.8) : Colors.white24,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.2,
+                ),
+              ),
+              const Spacer(),
               GestureDetector(
                 onTap: () => _handleCommand('SCH_CLEAR', index, ''),
+                behavior: HitTestBehavior.opaque,
                 child: Container(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.redAccent.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: Colors.redAccent.withOpacity(0.3),
-                    ),
+                    color: Colors.white.withOpacity(0.02),
+                    borderRadius: BorderRadius.circular(6),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.clear_rounded,
-                          color: Colors.redAccent, size: 12),
-                      const SizedBox(width: 4),
+                      Icon(Icons.close_rounded,
+                          color: isActive
+                              ? const Color(0xFFEF4444).withOpacity(0.5)
+                              : Colors.white10,
+                          size: 11),
+                      const SizedBox(width: 3),
                       Text(
                         "CLEAR",
-                        style: GoogleFonts.poppins(
-                          color: Colors.redAccent,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.5,
+                        style: GoogleFonts.outfit(
+                          color: isActive
+                              ? const Color(0xFFEF4444).withOpacity(0.5)
+                              : Colors.white10,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
                     ],
@@ -4572,29 +4906,18 @@ class _ScheduleControlDialogState extends State<_ScheduleControlDialog> {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          // Time Pickers Row
           Row(
             children: [
               Expanded(
-                child: _timeSelector(
-                  context,
-                  "START",
-                  on,
-                  isLunch ? 'LUNCH_ON' : 'SCH_ON',
-                  index,
-                  color,
-                ),
+                child: _timelineItem(
+                    "START", on, color, isLunch ? 'LUNCH_ON' : 'SCH_ON', index),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               Expanded(
-                child: _timeSelector(
-                  context,
-                  "END",
-                  off,
-                  isLunch ? 'LUNCH_OFF' : 'SCH_OFF',
-                  index,
-                  color,
-                ),
+                child: _timelineItem("END", off, color,
+                    isLunch ? 'LUNCH_OFF' : 'SCH_OFF', index),
               ),
             ],
           ),
@@ -4603,86 +4926,90 @@ class _ScheduleControlDialogState extends State<_ScheduleControlDialog> {
     );
   }
 
-  Widget _timeSelector(
-    BuildContext context,
-    String label,
-    String current,
-    String type,
-    int index,
-    Color themeColor,
-  ) {
-    final bool isSet = current != '--:--';
-
-    return GestureDetector(
-      onTap: () async {
-        final picked = await showTimePicker(
-          context: context,
-          initialTime: TimeOfDay.now(),
-          builder: (context, child) {
-            return Theme(
-              data: ThemeData.dark().copyWith(
-                colorScheme: ColorScheme.dark(
-                  primary: themeColor,
-                  onPrimary: Colors.white,
-                  surface: const Color(0xFF1B172E),
-                  onSurface: Colors.white,
-                ),
-              ),
-              child: child!,
-            );
-          },
-        );
-        if (picked != null) {
-          final formatted =
-              "${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}";
-          _handleCommand(type, index, formatted);
-        }
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
-        decoration: BoxDecoration(
-          color: isSet
-              ? themeColor.withOpacity(0.08)
-              : Colors.white.withOpacity(0.03),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isSet
-                ? themeColor.withOpacity(0.4)
-                : Colors.white.withOpacity(0.08),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.access_time_rounded,
-                  size: 10,
-                  color: isSet ? themeColor : Colors.white30,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  label,
-                  style: GoogleFonts.poppins(
-                    color: isSet ? themeColor : Colors.white30,
-                    fontSize: 9,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.0,
+  Widget _timelineItem(
+      String label, String time, Color color, String type, int index) {
+    final bool isSet = time != '--:--';
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () async {
+          if (_isPickerOpen) return;
+          setState(() => _isPickerOpen = true);
+          try {
+            final picked = await showTimePicker(
+              context: context,
+              initialTime: TimeOfDay.now(),
+              initialEntryMode: TimePickerEntryMode.dial,
+              builder: (context, child) => Theme(
+                data: ThemeData.dark().copyWith(
+                  colorScheme: ColorScheme.dark(
+                    primary: color,
+                    onPrimary: Colors.white,
+                    surface: const Color(0xFF131122),
+                    onSurface: Colors.white,
                   ),
+                  dialogBackgroundColor: const Color(0xFF131122),
                 ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _formatDisplayTime(current),
-              style: GoogleFonts.poppins(
-                color: isSet ? Colors.white : Colors.white24,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
+                child: child!,
               ),
+            );
+            if (picked != null) {
+              final formatted =
+                  "${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}";
+              _handleCommand(type, index, formatted);
+            }
+          } catch (e) {
+            debugPrint("Error showing time picker: $e");
+          } finally {
+            if (mounted) setState(() => _isPickerOpen = false);
+          }
+        },
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+          decoration: BoxDecoration(
+            color: isSet
+                ? color.withOpacity(0.06)
+                : Colors.white.withOpacity(0.01),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isSet
+                  ? color.withOpacity(0.2)
+                  : Colors.white.withOpacity(0.03),
+              width: 1.2,
             ),
-          ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.access_time_rounded,
+                      color: isSet ? color : Colors.white12, size: 12),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: GoogleFonts.outfit(
+                      color: isSet ? color.withOpacity(0.8) : Colors.white12,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _formatDisplayTime(time),
+                style: GoogleFonts.outfit(
+                  color: isSet ? Colors.white : Colors.white12,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -35,8 +35,7 @@ class _SystemViewPageState extends State<SystemViewPage> {
     final token = await AuthService.getCookieHeader() ?? '';
 
     // Reverting to /systems endpoint as per user's latest instruction
-    final apiUrl =
-        '${AppConfig.provisionBaseUrl}/systems'
+    final apiUrl = '${AppConfig.provisionBaseUrl}/systems'
         '?companyId=$companyId&siteId=$siteId&bucket=$bucket';
 
     debugPrint('🌐 [SystemView] Fetching Systems: $apiUrl');
@@ -46,6 +45,7 @@ class _SystemViewPageState extends State<SystemViewPage> {
         Uri.parse(apiUrl),
         headers: {
           'Authorization': 'Bearer $token',
+          'Cookie': 'auth_token=$token',
           'Content-Type': 'application/json',
         },
       );
@@ -56,27 +56,52 @@ class _SystemViewPageState extends State<SystemViewPage> {
         final List<dynamic> data = responseData['data'] as List<dynamic>;
 
         final filteredSystems = data.where((item) {
-          final systemType = (item['systemType'] ?? item['SystemType']) as Map<String, dynamic>?;
+          final systemType = (item['systemType'] ?? item['SystemType'])
+              as Map<String, dynamic>?;
           final typeName =
-              ((systemType?['name'] ?? systemType?['Name']) as String?)?.toLowerCase() ?? '';
+              ((systemType?['name'] ?? systemType?['Name']) as String?)
+                      ?.toLowerCase() ??
+                  '';
 
-          final systemShortId = (item['shortId'] ?? item['ShortId'] ?? item['systemShortId'] ?? item['SystemShortId'] as String?)?.toLowerCase() ?? '';
+          final systemShortId = (item['shortId'] ??
+                      item['ShortId'] ??
+                      item['systemShortId'] ??
+                      item['SystemShortId'] as String?)
+                  ?.toLowerCase() ??
+              '';
           final currentBucket = bucket.toLowerCase();
 
           // Check if it's an AC Monitoring system
-          final isAcSystem = typeName.contains('ac monitoring') || typeName.contains('ac monitoring system');
-          
+          final isAcSystem = typeName.contains('ac monitoring') ||
+              typeName.contains('ac monitoring system');
+
           // Trust the API's filtering by bucket/site/company.
           // Local filtering is too strict and can hide valid systems.
           return isAcSystem;
         }).map((item) {
-          final name = (item['name'] ?? item['Name'] ?? item['systemName'] ?? item['SystemName']) as String? ?? 'Unknown System';
-          final id = (item['systemId'] ?? item['SystemId'] ?? item['id'] ?? item['Id']) as String? ?? 'No ID';
-          final shortId = (item['shortId'] ?? item['ShortId'] ?? item['systemShortId'] ?? item['SystemShortId']) as String? ?? name;
-          final systemType = (item['systemType'] ?? item['SystemType']) as Map<String, dynamic>?;
-          final typeName = (systemType?['name'] ?? systemType?['Name']) as String? ?? 'AC System';
+          final name = (item['name'] ??
+                  item['Name'] ??
+                  item['systemName'] ??
+                  item['SystemName']) as String? ??
+              'Unknown System';
+          final id = (item['systemId'] ??
+                  item['SystemId'] ??
+                  item['id'] ??
+                  item['Id']) as String? ??
+              'No ID';
+          final shortId = (item['shortId'] ??
+                  item['ShortId'] ??
+                  item['systemShortId'] ??
+                  item['SystemShortId']) as String? ??
+              name;
+          final systemType = (item['systemType'] ?? item['SystemType'])
+              as Map<String, dynamic>?;
+          final typeName =
+              (systemType?['name'] ?? systemType?['Name']) as String? ??
+                  'AC System';
 
-          debugPrint('✅ [SystemView] Mapped System: $name ($id) with shortId: $shortId');
+          debugPrint(
+              '✅ [SystemView] Mapped System: $name ($id) with shortId: $shortId');
 
           return SystemItem(
             title: name.toUpperCase(),
@@ -118,7 +143,7 @@ class _SystemViewPageState extends State<SystemViewPage> {
         children: [
           // Header Section (Reduced as per user request to remove 'Equipment View' text)
           const SizedBox(height: 24),
-          
+
           // Systems List
           Expanded(
             child: isLoading
@@ -126,7 +151,8 @@ class _SystemViewPageState extends State<SystemViewPage> {
                     child: CircularProgressIndicator(color: Color(0xFF6CC042)),
                   )
                 : ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 12),
                     itemCount: systems.length,
                     itemBuilder: (context, index) {
                       return Padding(
@@ -178,7 +204,8 @@ class _SystemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => onViewPressed(system.systemId, system.originalName, system.systemShortId),
+      onTap: () => onViewPressed(
+          system.systemId, system.originalName, system.systemShortId),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -198,7 +225,8 @@ class _SystemCard extends StatelessWidget {
               decoration: BoxDecoration(
                 color: const Color(0xFF6CC042).withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF6CC042).withOpacity(0.2)),
+                border:
+                    Border.all(color: const Color(0xFF6CC042).withOpacity(0.2)),
               ),
               child: const Icon(
                 Icons.apartment_rounded,
@@ -223,7 +251,8 @@ class _SystemCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   // System Name Badge matching requested layout
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: const Color(0xFF0E0B16), // Dark Pill
                       borderRadius: BorderRadius.circular(6),

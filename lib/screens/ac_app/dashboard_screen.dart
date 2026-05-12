@@ -39,20 +39,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final data = cached['data'];
       final timestamp = cached['timestamp'];
       final diff = DateTime.now().millisecondsSinceEpoch - (timestamp as int);
-      
+
       // Only show cache if it's less than 24 hours old (optional)
       if (diff < 86400000) {
         setState(() {
           _summary = data['summary'];
           _equipments = data['equipments'];
-          _groupedEquipments = _processEquipments(data['equipments'], data['systemsMap'] ?? {});
+          _groupedEquipments =
+              _processEquipments(data['equipments'], data['systemsMap'] ?? {});
           _isLoading = false; // Stop loading immediately as we have cache
         });
       }
     }
   }
 
-  Map<String, List<dynamic>> _processEquipments(List<dynamic> equipments, Map<String, dynamic> sMap) {
+  Map<String, List<dynamic>> _processEquipments(
+      List<dynamic> equipments, Map<String, dynamic> sMap) {
     final Map<String, List<dynamic>> gMap = {};
     for (var e in equipments) {
       final sId = e['systemId'];
@@ -80,6 +82,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         Uri.parse(url),
         headers: {
           'Authorization': 'Bearer $token',
+          'Cookie': 'auth_token=$token',
           'Content-Type': 'application/json',
         },
       );
@@ -94,6 +97,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Uri.parse(systemsUrl),
             headers: {
               'Authorization': 'Bearer $token',
+              'Cookie': 'auth_token=$token',
               'Content-Type': 'application/json',
             },
           );
@@ -104,10 +108,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
             if (sBody['status'] == 1 && sBody['data'] != null) {
               final currentBucket = bucket.toLowerCase();
               for (var s in sBody['data']) {
-                final sShortId = (s['shortId'] ?? s['ShortId'] ?? s['systemShortId'] ?? s['SystemShortId'] as String?)?.toLowerCase() ?? '';
-                final sId = (s['systemId'] ?? s['SystemId'] ?? s['id'] ?? s['Id'])?.toString();
-                final sName = (s['name'] ?? s['Name'] ?? s['systemName'] ?? s['SystemName']) as String? ?? 'Unknown System';
-                
+                final sShortId = (s['shortId'] ??
+                            s['ShortId'] ??
+                            s['systemShortId'] ??
+                            s['SystemShortId'] as String?)
+                        ?.toLowerCase() ??
+                    '';
+                final sId =
+                    (s['systemId'] ?? s['SystemId'] ?? s['id'] ?? s['Id'])
+                        ?.toString();
+                final sName = (s['name'] ??
+                        s['Name'] ??
+                        s['systemName'] ??
+                        s['SystemName']) as String? ??
+                    'Unknown System';
+
                 // Trust the API's filtering. If it's in the response, include it.
                 if (sId != null) {
                   sMap[sId] = sName;
@@ -165,7 +180,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _groupedEquipments = gMap;
               _isLoading = false;
             });
-            
+
             // Save to cache for next time
             LocalCacheService.saveDashboardData({
               'summary': localSummary,

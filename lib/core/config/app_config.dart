@@ -25,7 +25,8 @@ class AppConfig {
   static int get mqttPort =>
       int.tryParse(dotenv.env['MQTT_PORT'] ?? '1883') ?? 1883;
 
-  static String get mqttTopic => dotenv.env['MQTT_TOPIC'] ?? 'sustainabyte_demo';
+  static String get mqttTopic =>
+      dotenv.env['MQTT_TOPIC'] ?? 'sustainabyte_demo';
 
   static String get mqttControlTopic =>
       dotenv.env['MQTT_CONTROL_TOPIC'] ?? 'testir/sustainabyte_demo/control';
@@ -44,4 +45,3 @@ class AppConfig {
   static String get mqttPayloadPrefix =>
       dotenv.env['MQTT_PAYLOAD_PREFIX'] ?? 'Sustainabyte_testir';
 }
-

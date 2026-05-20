@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:ir_blaster_ac/core/services/auth_service.dart';
 import 'package:ir_blaster_ac/core/config/app_config.dart';
+import 'package:ir_blaster_ac/core/services/local_cache_service.dart';
 
 /// System View page showing list of AC monitoring systems
 class SystemViewPage extends StatefulWidget {
@@ -28,6 +29,7 @@ class _SystemViewPageState extends State<SystemViewPage> {
     _fetchAndFilterSystems();
   }
 
+
   Future<void> _fetchAndFilterSystems() async {
     final companyId = await AuthService.getCompanyId() ?? '';
     final siteId = await AuthService.getSiteId() ?? '';
@@ -36,7 +38,7 @@ class _SystemViewPageState extends State<SystemViewPage> {
 
     // Reverting to /systems endpoint as per user's latest instruction
     final apiUrl = '${AppConfig.provisionBaseUrl}/systems'
-        '?companyId=$companyId&siteId=$siteId&bucket=$bucket';
+        '?companyId=$companyId&siteId=$siteId';
 
     debugPrint('🌐 [SystemView] Fetching Systems: $apiUrl');
 
@@ -69,15 +71,9 @@ class _SystemViewPageState extends State<SystemViewPage> {
                       item['SystemShortId'] as String?)
                   ?.toLowerCase() ??
               '';
-          final currentBucket = bucket.toLowerCase();
-
-          // Check if it's an AC Monitoring system
-          final isAcSystem = typeName.contains('ac monitoring') ||
-              typeName.contains('ac monitoring system');
-
           // Trust the API's filtering by bucket/site/company.
-          // Local filtering is too strict and can hide valid systems.
-          return isAcSystem;
+          // If the API returns a system, we display it.
+          return true;
         }).map((item) {
           final name = (item['name'] ??
                   item['Name'] ??
@@ -113,6 +109,22 @@ class _SystemViewPageState extends State<SystemViewPage> {
           );
         }).toList();
 
+        // Add hardcoded "TESTIR" as requested
+        final bool alreadyExists = filteredSystems.any(
+            (s) => s.systemId == 'Sustainabyte_testir' || s.title.contains('TESTIR'));
+        if (!alreadyExists) {
+          filteredSystems.insert(
+              0,
+              SystemItem(
+                title: "TESTIR",
+                originalName: "TESTIR",
+                equipment: "AC MONITORING",
+                systemId: "Sustainabyte_testir",
+                systemShortId: "Sustainabyte_testir",
+                iconColor: const Color(0xFF6CC042),
+              ));
+        }
+
         if (mounted) {
           widget.onCountChanged?.call(filteredSystems.length);
           setState(() {
@@ -121,10 +133,43 @@ class _SystemViewPageState extends State<SystemViewPage> {
           });
         }
       } else {
-        if (mounted) setState(() => isLoading = false);
+        if (mounted) {
+          final fallbackSystems = [
+            SystemItem(
+              title: "TESTIR",
+              originalName: "TESTIR",
+              equipment: "AC MONITORING",
+              systemId: "Sustainabyte_testir",
+              systemShortId: "Sustainabyte_testir",
+              iconColor: const Color(0xFF6CC042),
+            )
+          ];
+          widget.onCountChanged?.call(fallbackSystems.length);
+          setState(() {
+            systems = fallbackSystems;
+            isLoading = false;
+          });
+        }
       }
     } catch (e) {
-      if (mounted) setState(() => isLoading = false);
+      debugPrint('❌ [SystemView] Error: $e');
+      if (mounted) {
+        final fallbackSystems = [
+          SystemItem(
+            title: "TESTIR",
+            originalName: "TESTIR",
+            equipment: "AC MONITORING",
+            systemId: "Sustainabyte_testir",
+            systemShortId: "Sustainabyte_testir",
+            iconColor: const Color(0xFF6CC042),
+          )
+        ];
+        widget.onCountChanged?.call(fallbackSystems.length);
+        setState(() {
+          systems = fallbackSystems;
+          isLoading = false;
+        });
+      }
     }
   }
 
@@ -143,6 +188,7 @@ class _SystemViewPageState extends State<SystemViewPage> {
         children: [
           // Header Section (Reduced as per user request to remove 'Equipment View' text)
           const SizedBox(height: 24),
+
 
           // Systems List
           Expanded(

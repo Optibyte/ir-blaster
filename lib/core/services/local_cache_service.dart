@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 class LocalCacheService {
   static const String _dashboardCacheKey = 'cache_dashboard_summary';
   static const String _devicePrefix = 'cache_device_';
+  static const String _wifiSsidKey = 'wifi_ssid';
+  static const String _wifiPasswordKey = 'wifi_password';
 
   /// Save dashboard data to local storage
   static Future<void> saveDashboardData(Map<String, dynamic> data) async {
@@ -86,6 +88,32 @@ class LocalCacheService {
       debugPrint('⚠️ [Cache] Error reading equip list: $e');
     }
     return null;
+  }
+
+  /// Save WiFi credentials
+  static Future<void> saveWifiCredentials(String ssid, String password) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_wifiSsidKey, ssid);
+      await prefs.setString(_wifiPasswordKey, password);
+      debugPrint('✅ [Cache] WiFi credentials saved.');
+    } catch (e) {
+      debugPrint('⚠️ [Cache] Error saving WiFi credentials: $e');
+    }
+  }
+
+  /// Retrieve WiFi credentials
+  static Future<Map<String, String>> getWifiCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return {
+        'ssid': prefs.getString(_wifiSsidKey) ?? '',
+        'password': prefs.getString(_wifiPasswordKey) ?? '',
+      };
+    } catch (e) {
+      debugPrint('⚠️ [Cache] Error reading WiFi credentials: $e');
+      return {'ssid': '', 'password': ''};
+    }
   }
 
   /// Clear all cached data (used during logout)

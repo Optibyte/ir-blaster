@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../service/bluetooth_service.dart';
+import '../core/services/local_cache_service.dart';
 
 class WifiConfigPage extends StatefulWidget {
   final BluetoothService bluetoothService;
@@ -32,6 +33,9 @@ class _WifiConfigPageState extends State<WifiConfigPage> {
 
     try {
       await widget.bluetoothService.sendWifiCredentials(ssid, password);
+      // Save to local storage
+      await LocalCacheService.saveWifiCredentials(ssid, password);
+      
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('WiFi credentials sent to ESP32')),
       );

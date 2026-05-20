@@ -11,6 +11,7 @@ import 'bluetooth_scanner_page.dart';
 import 'widgets/ac_control_widget.dart';
 import 'widgets/temperature_widget.dart';
 import 'widgets/wifi_section_widget.dart';
+import '../core/services/local_cache_service.dart';
 
 class ConfigurationPage extends StatefulWidget {
   final BluetoothConnection connection;
@@ -262,6 +263,13 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       if (u != null) _mqttUserController.text = u;
       if (pw != null) _mqttPassController.text = pw;
       if (t != null && t.isNotEmpty) _mqttTopicController.text = t;
+
+      // Load WiFi credentials
+      final wifiCreds = await LocalCacheService.getWifiCredentials();
+      if (wifiCreds['ssid']!.isNotEmpty) {
+        _ssidController.text = wifiCreds['ssid']!;
+        _wifiPasswordController.text = wifiCreds['password']!;
+      }
     } catch (_) {}
   }
 
@@ -681,6 +689,10 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       _showSnack("Enter SSID and password", _red);
       return;
     }
+
+    // Save to local storage
+    await LocalCacheService.saveWifiCredentials(ssid, pass);
+
     setState(() {
       _isWifiConnected = false; 
       _wifiStatus = "Connecting to WiFi...";

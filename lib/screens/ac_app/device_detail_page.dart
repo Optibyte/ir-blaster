@@ -164,7 +164,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     _setupPersistentMqtt();
     // WiFi status caching disabled to prevent stale data flickering
     // _loadCachedStatus(); 
-    _loadCachedEquipments();
+    // _loadCachedEquipments(); // Disabled to prevent loading stale cached equipment list
 
     // Telemetry is no longer "loading" once we have the persistent connection active
     if (mounted) {
@@ -228,10 +228,13 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   }
 
   Future<void> _loadCachedEquipments() async {
+    // Disabled to guarantee only live data is used
+    /*
     final cached = await LocalCacheService.getEquipmentList(widget.systemId);
     if (cached != null && mounted) {
       _applyEquipmentData(cached);
     }
+    */
   }
 
   void _applyEquipmentData(List<dynamic> equipmentList) {
@@ -327,13 +330,12 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     debugPrint('📱 [Lifecycle] App State changed to: $state');
     if (state == AppLifecycleState.resumed) {
       debugPrint(
-          '🔄 [Lifecycle] App resumed! Force-refreshing MQTT connection & live status...');
-      setState(() {
-        _isOnline = false;
-        _isAnalyzing = false;
-        _lastMessageReceivedTime =
-            DateTime.now().subtract(const Duration(seconds: 20));
-      });
+          '🔄 [Lifecycle] App resumed! Refreshing MQTT connection & fetching latest equipment data...');
+      
+      // Re-fetch the equipment data from the live HTTP API to get fresh configuration
+      _fetchEquipments();
+      
+      // Verify/reconnect the MQTT connection silently in the background
       _setupPersistentMqtt();
     }
   }
@@ -343,6 +345,149 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     _subscription = null;
     _pollTimer?.cancel();
     _pollTimer = null;
+  }
+
+  void _showEquipmentSelectionPopup(BuildContext context, bool isDark) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      barrierColor: Colors.black54,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (BuildContext ctx) {
+        return Container(
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1B172E) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              // Grab handle
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white12 : Colors.black12,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 20, 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Select Equipment',
+                      style: GoogleFonts.outfit(
+                        color: isDark ? Colors.white : const Color(0xFF1B172E),
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => Navigator.pop(ctx),
+                      child: Icon(
+                        Icons.close_rounded,
+                        color: isDark ? Colors.white30 : Colors.black26,
+                        size: 22,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Divider
+              Container(
+                height: 0.5,
+                margin: const EdgeInsets.symmetric(horizontal: 24),
+                color: isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.06),
+              ),
+              // Equipment list
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.4,
+                ),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  itemCount: _equipmentsData.length,
+                  itemBuilder: (context, index) {
+                    final e = _equipmentsData[index];
+                    final String name = e['name']?.toString() ?? 'N/A';
+                    final String id = e['equipmentId']?.toString() ?? '';
+                    final bool isSelected = id == _selectedEquipmentId;
+
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _onEquipmentSelected(
+                            id,
+                            name,
+                            e['equipmentTypeId']?.toString() ?? '',
+                            (e['shortId'] ?? e['equipmentShortId'])?.toString() ?? '',
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? const Color(0xFF6CC042).withOpacity(0.08)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: isSelected
+                                      ? const Color(0xFF6CC042)
+                                      : (isDark ? Colors.white12 : Colors.black12),
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Text(
+                                  name,
+                                  style: GoogleFonts.outfit(
+                                    color: isSelected
+                                        ? (isDark ? Colors.white : const Color(0xFF1B172E))
+                                        : (isDark ? Colors.white54 : Colors.black45),
+                                    fontSize: 15,
+                                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                              if (isSelected)
+                                Icon(
+                                  Icons.check_rounded,
+                                  color: const Color(0xFF6CC042),
+                                  size: 20,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              SizedBox(height: MediaQuery.of(ctx).padding.bottom + 12),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _fetchEquipments() async {
@@ -371,8 +516,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         if (listData != null && listData is List && mounted && listData.isNotEmpty) {
           final List<dynamic> equipmentList = listData;
           _applyEquipmentData(equipmentList);
-          // Save to cache
-          LocalCacheService.saveEquipmentList(widget.systemId, equipmentList);
+          // Save to cache disabled to use only live data
+          // LocalCacheService.saveEquipmentList(widget.systemId, equipmentList);
         } else if (mounted) {
           if (widget.systemId == 'Sustainabyte_testir') {
             _applyEquipmentData([
@@ -953,14 +1098,14 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         });
         if (_recentLogs.length > 5) _recentLogs.removeLast();
 
-        // 2. Save to cache only every 10 seconds to avoid disk I/O lag
+        // 2. Save to cache disabled to prevent stale data persistence
         if (now.difference(_lastUpdateTime) > const Duration(seconds: 10)) {
           _lastUpdateTime = now;
-          LocalCacheService.saveDeviceStatus(widget.systemShortId, {
-            'temp': _actualTemperature,
-            'hum': _humidity,
-            'power': _isPowerOn,
-          });
+          // LocalCacheService.saveDeviceStatus(widget.systemShortId, {
+          //   'temp': _actualTemperature,
+          //   'hum': _humidity,
+          //   'power': _isPowerOn,
+          // });
         }
 
         if (mounted) setState(() {});
@@ -1285,198 +1430,58 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             ),
             onPressed: () => Navigator.pop(context),
           ),
-          title: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.05),
-                    width: 1,
-                  ),
-                  boxShadow: [
-                    if (isDark)
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 8,
-                        offset: const Offset(0, 4),
-                      ),
-                  ],
+          title: GestureDetector(
+            onTap: () => _showEquipmentSelectionPopup(context, isDark),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isDark
+                      ? [const Color(0xFF231F3F), const Color(0xFF1B172E)]
+                      : [Colors.white, const Color(0xFFF1F5F9)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<Map<String, dynamic>>(
-                          value: _equipmentsData.isNotEmpty ? _equipmentsData.firstWhere(
-                            (e) => e['equipmentId']?.toString() == _selectedEquipmentId,
-                            orElse: () => _equipmentsData.first,
-                          ) : null,
-                          icon: Padding(
-                            padding: const EdgeInsets.only(left: 12),
-                            child: Icon(
-                              Icons.expand_more_rounded,
-                              color: const Color(0xFF6CC042),
-                              size: 22,
-                            ),
-                          ),
-                          dropdownColor: isDark ? const Color(0xFF1B172E) : Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          alignment: Alignment.center,
-                          isExpanded: false,
-                          isDense: true,
-                          elevation: 16,
-                          selectedItemBuilder: (BuildContext context) {
-                            return _equipmentsData.map<Widget>((e) {
-                              return Text(
-                                (e['name']?.toString() ?? 'N/A').toUpperCase(),
-                                style: GoogleFonts.outfit(
-                                  color: isDark ? Colors.white : const Color(0xFF1B172E),
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.5,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 1,
-                              );
-                            }).toList();
-                          },
-                          items: _equipmentsData.map((e) {
-                            final String name = e['name']?.toString() ?? 'N/A';
-                            final bool isSelected = e['equipmentId']?.toString() == _selectedEquipmentId;
-                            return DropdownMenuItem<Map<String, dynamic>>(
-                              value: e,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(12),
-                                  color: isSelected ? const Color(0xFF6CC042).withOpacity(0.1) : Colors.transparent,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.ac_unit_rounded,
-                                      size: 18,
-                                      color: isSelected ? const Color(0xFF6CC042) : (isDark ? Colors.white38 : Colors.black38),
-                                    ),
-                                    const SizedBox(width: 14),
-                                    Expanded(
-                                      child: Text(
-                                        name,
-                                        style: GoogleFonts.outfit(
-                                          color: isDark ? (isSelected ? Colors.white : Colors.white70) : (isSelected ? const Color(0xFF1B172E) : Colors.black87),
-                                          fontSize: 15,
-                                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                                        ),
-                                      ),
-                                    ),
-                                    if (isSelected)
-                                      const Icon(Icons.check_circle_rounded, color: Color(0xFF6CC042), size: 16),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                          onChanged: (Map<String, dynamic>? newValue) {
-                            if (newValue != null) {
-                              _onEquipmentSelected(
-                                newValue['equipmentId']?.toString() ?? '',
-                                newValue['name']?.toString() ?? '',
-                                newValue['equipmentTypeId']?.toString() ?? '',
-                                (newValue['shortId'] ?? newValue['equipmentShortId'])?.toString() ?? '',
-                              );
-                            }
-                          },
-                        ),
-                      ),
-                    ),
-                  ),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: const Color(0xFF6CC042).withOpacity(0.3),
+                  width: 1.5,
                 ),
-              ),
-              const SizedBox(height: 4),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_savedSsid.isNotEmpty) ...[
-                    Icon(
-                      Icons.wifi_rounded,
-                      size: 10,
-                      color: isDark ? Colors.white38 : Colors.black38,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      _savedSsid,
-                      style: GoogleFonts.outfit(
-                        color: isDark ? Colors.white38 : Colors.black38,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      child: Text(
-                        '•',
-                        style: TextStyle(
-                          color: isDark ? Colors.white24 : Colors.black26,
-                          fontSize: 10,
-                        ),
-                      ),
-                    ),
-                  ],
-                  Text(
-                    'Last Data: $_lastMqttUpdateTime',
-                    style: GoogleFonts.outfit(
-                      color: isDark ? Colors.white54 : Colors.black54,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w400,
-                    ),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF6CC042).withOpacity(0.08),
+                    blurRadius: 8,
+                    spreadRadius: 1,
                   ),
-                  if (_isAnalyzing) ...[
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.amber.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        'ANALYZING...',
-                        style: GoogleFonts.outfit(
-                          color: Colors.amber,
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ] else if (!_isOnline && _inactiveTimeString != 'N/A') ...[
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.redAccent.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        'OFFLINE • $_inactiveTimeString',
-                        style: GoogleFonts.outfit(
-                          color: Colors.redAccent,
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
                 ],
               ),
-            ],
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.ac_unit_rounded,
+                    color: const Color(0xFF6CC042),
+                    size: 16,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _selectedEquipmentName.toUpperCase(),
+                    style: GoogleFonts.outfit(
+                      color: isDark ? Colors.white : const Color(0xFF1B172E),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    color: const Color(0xFF6CC042),
+                    size: 18,
+                  ),
+                ],
+              ),
+            ),
           ),
           actions: [
             if (_pulseController != null)
@@ -1971,12 +1976,18 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             ),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: const Color(0xFF8B5CF6).withOpacity(0.3), // Glowing violet border highlight
+              color: (_isAnalyzing
+                      ? Colors.amber
+                      : (_isOnline ? const Color(0xFF6CC042) : const Color(0xFFEF4444)))
+                  .withOpacity(0.4),
               width: 1.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF8B5CF6).withOpacity(0.15), // Violet glow
+                color: (_isAnalyzing
+                        ? Colors.amber
+                        : (_isOnline ? const Color(0xFF6CC042) : const Color(0xFFEF4444)))
+                    .withOpacity(0.2),
                 blurRadius: 16,
                 spreadRadius: 2,
               ),
@@ -2082,13 +2093,15 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                   ],
                 );
               }
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(child: _buildStatusCard(isDark)),
-                  if (_isOnline) const SizedBox(width: 12),
-                  if (_isOnline) Expanded(child: _buildHumidityCard(isDark)),
-                ],
+              return IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(child: _buildStatusCard(isDark)),
+                    if (_isOnline) const SizedBox(width: 12),
+                    if (_isOnline) Expanded(child: _buildHumidityCard(isDark)),
+                  ],
+                ),
               );
             },
           ),
@@ -2212,26 +2225,41 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'AC STATUS',
-                style: GoogleFonts.poppins(
-                  color: isDark ? Colors.white24 : Colors.black45,
-                  fontSize: 8,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.0,
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  'ID: ${_deviceId.isEmpty ? 'testir' : _deviceId}',
-                  style: GoogleFonts.poppins(
-                    color: isDark ? Colors.white10 : Colors.black12,
-                    fontSize: 7,
-                    fontWeight: FontWeight.w500,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'AC STATUS',
+                    style: GoogleFonts.poppins(
+                      color: isDark ? Colors.white24 : Colors.black45,
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.0,
+                    ),
                   ),
-                ),
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: _isAnalyzing
+                          ? Colors.amber
+                          : (_isOnline ? const Color(0xFF6CC042) : Colors.redAccent),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: (_isAnalyzing
+                                  ? Colors.amber
+                                  : (_isOnline ? const Color(0xFF6CC042) : Colors.redAccent))
+                              .withOpacity(0.4),
+                          blurRadius: 4,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
+              const SizedBox(height: 12),
               const SizedBox(height: 2),
               _isAnalyzing
                   ? Text(
@@ -2270,32 +2298,63 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                 size: 18,
               ),
               const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _isAnalyzing
-                        ? 'ANALYZING'
-                        : (_isOnline ? 'ACTIVE' : 'INACTIVE'),
-                    style: GoogleFonts.poppins(
-                      color: isDark ? Colors.white : Colors.black,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  if (!_isOnline && _inactiveTimeString != 'N/A')
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        _inactiveTimeString,
-                        style: GoogleFonts.poppins(
-                          color: isDark ? Colors.white54 : Colors.black54,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w500,
-                        ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _isAnalyzing
+                          ? 'ANALYZING'
+                          : (_isOnline ? 'ACTIVE' : 'INACTIVE'),
+                      style: GoogleFonts.poppins(
+                        color: isDark ? Colors.white : Colors.black,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                ],
+                    if (!_isOnline && _inactiveTimeString != 'N/A')
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          _inactiveTimeString,
+                          style: GoogleFonts.poppins(
+                            color: isDark ? Colors.white54 : Colors.black54,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Divider(
+            color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05),
+            height: 1,
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(
+                Icons.history_toggle_off_rounded,
+                size: 10,
+                color: isDark ? Colors.white30 : Colors.black38,
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  _lastMqttUpdateTime.isEmpty
+                      ? 'No Data Yet'
+                      : 'Last Data: $_lastMqttUpdateTime',
+                  style: GoogleFonts.poppins(
+                    color: isDark ? Colors.white30 : Colors.black45,
+                    fontSize: 7.5,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ],
           ),
@@ -2305,6 +2364,19 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   }
 
   Widget _buildHumidityCard(bool isDark) {
+    String comfortText = 'Optimal Comfort';
+    IconData comfortIcon = Icons.eco_rounded;
+    Color comfortColor = const Color(0xFF6CC042);
+    if (_humidity < 40) {
+      comfortText = 'Dry Atmosphere';
+      comfortIcon = Icons.wb_sunny_rounded;
+      comfortColor = const Color(0xFFF59E0B);
+    } else if (_humidity > 60) {
+      comfortText = 'High Humidity';
+      comfortIcon = Icons.water_drop_rounded;
+      comfortColor = const Color(0xFF3B82F6);
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
@@ -2326,47 +2398,114 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'HUMIDITY',
-            style: GoogleFonts.poppins(
-              color: isDark ? Colors.white24 : Colors.black45,
-              fontSize: 8,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.0,
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'HUMIDITY',
+                    style: GoogleFonts.poppins(
+                      color: isDark ? Colors.white24 : Colors.black45,
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: comfortColor,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: comfortColor.withOpacity(0.4),
+                          blurRadius: 4,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const SizedBox(height: 2),
+              Text(
+                'LIVE SENSOR',
+                style: GoogleFonts.poppins(
+                  color: isDark ? Colors.white24 : Colors.black38,
+                  fontSize: 7,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Row(
             children: [
               SizedBox(
-                width: 28,
-                height: 28,
+                width: 22,
+                height: 22,
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
                     CircularProgressIndicator(
                       value: _humidity / 100,
                       strokeWidth: 3,
-                      backgroundColor: Colors.white10,
-                      valueColor: const AlwaysStoppedAnimation<Color>(
-                        Color(0xFFF59E0B),
-                      ),
+                      backgroundColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+                      valueColor: AlwaysStoppedAnimation<Color>(comfortColor),
                     ),
-                    const Icon(
+                    Icon(
                       Icons.water_drop_rounded,
-                      size: 10,
-                      color: Color(0xFFF59E0B),
+                      size: 9,
+                      color: comfortColor,
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
-              Text(
-                '$_humidity%',
-                style: GoogleFonts.poppins(
-                  color: isDark ? Colors.white : Colors.black,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$_humidity%',
+                      style: GoogleFonts.poppins(
+                        color: isDark ? Colors.white : Colors.black,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Divider(
+            color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05),
+            height: 1,
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(
+                comfortIcon,
+                size: 10,
+                color: comfortColor.withOpacity(0.6),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  comfortText,
+                  style: GoogleFonts.poppins(
+                    color: isDark ? Colors.white30 : Colors.black45,
+                    fontSize: 7.5,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -5269,6 +5408,131 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
     );
   }
 
+  void _showValidationError(String message) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEF4444).withOpacity(0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.error_outline_rounded,
+                color: Color(0xFFEF4444),
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                message,
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: const Color(0xFF1C111C),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: const Color(0xFFEF4444).withOpacity(0.3),
+            width: 1.2,
+          ),
+        ),
+        elevation: 6,
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  bool _validateSchedules() {
+    int? parseTimeToMinutes(String? timeStr) {
+      if (timeStr == null ||
+          timeStr == '--:--' ||
+          timeStr.trim().isEmpty ||
+          timeStr.toUpperCase() == 'DISABLED') {
+        return null;
+      }
+      final parts = timeStr.split(':');
+      if (parts.length != 2) return null;
+      final hour = int.tryParse(parts[0]);
+      final minute = int.tryParse(parts[1]);
+      if (hour == null || minute == null) return null;
+      return hour * 60 + minute;
+    }
+
+    bool intervalsOverlap(int s1, int e1, int s2, int e2) {
+      if (s1 < e1 && s2 < e2) {
+        return math.max(s1, s2) < math.min(e1, e2);
+      }
+      List<List<int>> getSubIntervals(int start, int end) {
+        if (start < end) {
+          return [[start, end]];
+        } else {
+          return [[start, 1440], [0, end]];
+        }
+      }
+      final list1 = getSubIntervals(s1, e1);
+      final list2 = getSubIntervals(s2, e2);
+      for (final i1 in list1) {
+        for (final i2 in list2) {
+          if (math.max(i1[0], i2[0]) < math.min(i1[1], i2[1])) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    for (int i = 0; i < _localSchedules.length; i++) {
+      final onStr = _localSchedules[i]['on'];
+      final offStr = _localSchedules[i]['off'];
+      
+      final start = parseTimeToMinutes(onStr);
+      final end = parseTimeToMinutes(offStr);
+      
+      if (start != null || end != null) {
+        if (start == null || end == null) {
+          _showValidationError('Schedule ${i + 1} must have both start and end times set, or be completely cleared.');
+          return false;
+        }
+        
+        if (start == end) {
+          _showValidationError('Schedule ${i + 1} cannot start and end at the exact same time.');
+          return false;
+        }
+        
+        // Compare with other daily schedules
+        for (int j = i + 1; j < _localSchedules.length; j++) {
+          final otherOnStr = _localSchedules[j]['on'];
+          final otherOffStr = _localSchedules[j]['off'];
+          
+          final startOther = parseTimeToMinutes(otherOnStr);
+          final endOther = parseTimeToMinutes(otherOffStr);
+          
+          if (startOther != null && endOther != null) {
+            if (intervalsOverlap(start, end, startOther, endOther)) {
+              _showValidationError('Schedule ${i + 1} overlaps with Schedule ${j + 1}. Please adjust your timings.');
+              return false;
+            }
+          }
+        }
+      }
+    }
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -5456,6 +5720,8 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
                       Expanded(
                         child: ElevatedButton(
                           onPressed: () {
+                            if (!_validateSchedules()) return;
+                            
                             widget.onSave(_localSchedules, _localLunch, _hasClearedAll);
                             Navigator.pop(context);
                             

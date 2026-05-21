@@ -82,6 +82,55 @@ class AuthService {
     }
   }
 
+  static bool _isPerformingSilentLogin = false;
+
+  /// Ensures that we have a valid session and user details.
+  /// If not, or if the current session is invalid/expired, perform a silent login.
+  static Future<void> ensureAuthenticated() async {
+    if (_isPerformingSilentLogin) return;
+    _isPerformingSilentLogin = true;
+    try {
+      final token = await _storage.read(key: _cookieKey);
+      final companyId = await _storage.read(key: _companyIdKey);
+      
+      bool needLogin = token == null || token.isEmpty || companyId == null || companyId.isEmpty;
+      
+      if (!needLogin) {
+        // Double check session validity with the backend verify endpoint.
+        final response = await http.get(
+          Uri.parse(AppConfig.verifyEndpoint),
+          headers: {
+            'Cookie': 'auth_token=$token',
+            'Content-Type': 'application/json',
+          },
+        ).timeout(const Duration(seconds: 5));
+
+        if (response.statusCode == 200) {
+          final body = jsonDecode(response.body);
+          if (body['status'] != 1) {
+            needLogin = true;
+          }
+        } else {
+          needLogin = true;
+        }
+      }
+
+      if (needLogin) {
+        debugPrint('🔐 [AuthService] No active/valid session. Performing silent background login...');
+        final error = await login('dharunsuperadmin@sustainabyte.ai', '123');
+        if (error != null) {
+          debugPrint('❌ [AuthService] Silent login failed: $error');
+        } else {
+          debugPrint('✅ [AuthService] Silent login completed successfully.');
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ [AuthService] Silent login exception: $e');
+    } finally {
+      _isPerformingSilentLogin = false;
+    }
+  }
+
   /// Verifies current session by hitting the verify endpoint.
   static Future<Map<String, dynamic>?> verify() async {
     try {
@@ -109,25 +158,42 @@ class AuthService {
     }
   }
 
-  static Future<String?> getCookieHeader() async =>
-      _storage.read(key: _cookieKey);
+  static Future<String?> getCookieHeader() async {
+    await ensureAuthenticated();
+    return _storage.read(key: _cookieKey);
+  }
 
   static Future<Map<String, dynamic>?> getUserData() async {
+    await ensureAuthenticated();
     final raw = await _storage.read(key: _userDataKey);
     if (raw == null) return null;
     return jsonDecode(raw) as Map<String, dynamic>;
   }
 
-  static Future<String?> getEmail() async => _storage.read(key: _emailKey);
+  static Future<String?> getEmail() async {
+    await ensureAuthenticated();
+    return _storage.read(key: _emailKey);
+  }
 
-  static Future<String?> getCompanyId() async =>
-      _storage.read(key: _companyIdKey);
+  static Future<String?> getCompanyId() async {
+    await ensureAuthenticated();
+    return _storage.read(key: _companyIdKey);
+  }
 
-  static Future<String?> getBucket() async => _storage.read(key: _bucketKey);
+  static Future<String?> getBucket() async {
+    await ensureAuthenticated();
+    return _storage.read(key: _bucketKey);
+  }
 
-  static Future<String?> getSiteId() async => _storage.read(key: _siteIdKey);
+  static Future<String?> getSiteId() async {
+    await ensureAuthenticated();
+    return _storage.read(key: _siteIdKey);
+  }
 
-  static Future<String?> getZoneId() async => _storage.read(key: _zoneIdKey);
+  static Future<String?> getZoneId() async {
+    await ensureAuthenticated();
+    return _storage.read(key: _zoneIdKey);
+  }
 
   static Future<bool> hasStoredSession() async {
     final c = await _storage.read(key: _cookieKey);

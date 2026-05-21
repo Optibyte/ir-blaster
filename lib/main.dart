@@ -89,7 +89,7 @@ class _AuthGateState extends State<_AuthGate> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                  const Icon(Icons.error_outline, color: Color.fromARGB(255, 247, 134, 126), size: 48),
                   const SizedBox(height: 16),
                   Text(
                     'Connection Error',

@@ -13,4 +13,6 @@ class AppColors {
   static const Color disconnected = Color(0xFFE63946);
   static const Color navBar = Color(0xFF1B172E);
   static const Color darkBlue = Color(0xFF1B172E);
+  static const Color onDarkTextPrimary = Colors.white;
+  static const Color onDarkTextSecondary = Colors.white70;
 }

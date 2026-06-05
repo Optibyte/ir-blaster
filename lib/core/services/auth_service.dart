@@ -43,19 +43,38 @@ class AuthService {
         if (body['status'] == 1) {
           final userData = body['data'];
           
-          // Extract token from set-cookie header since the new AuthService uses HTTP-only cookies
-          String token = body['token'] ?? '';
+          // Extract token from set-cookie header or response body
+          String token = '';
+          if (body['token'] != null) {
+            token = body['token'].toString();
+          } else if (userData != null && userData is Map && userData['token'] != null) {
+            token = userData['token'].toString();
+          }
+
           if (token.isEmpty) {
-            final String? rawCookie = response.headers['set-cookie'];
+            String? rawCookie;
+            response.headers.forEach((k, v) {
+              if (k.toLowerCase() == 'set-cookie') {
+                rawCookie = v;
+              }
+            });
+
             if (rawCookie != null) {
-              final int index = rawCookie.indexOf('auth_token=');
-              if (index != -1) {
-                final int endIndex = rawCookie.indexOf(';', index);
-                token = rawCookie.substring(index + 11, endIndex != -1 ? endIndex : rawCookie.length);
+              // Support multiple cookies joined by comma or semicolon
+              final cookieParts = rawCookie!.split(RegExp(r'[;,]'));
+              for (var part in cookieParts) {
+                part = part.trim();
+                if (part.startsWith('auth_token=')) {
+                  token = part.substring('auth_token='.length);
+                  break;
+                }
               }
             }
           }
-          if (token.isEmpty) token = 'valid_session';
+          if (token.isEmpty) {
+            debugPrint('⚠️ [AuthService] auth_token not found in cookies or response body. Using fallback "valid_session".');
+            token = 'valid_session';
+          }
 
           // Persist session and user details from the REAL response
           await _storage.write(key: _cookieKey, value: token);
@@ -93,7 +112,12 @@ class AuthService {
       final token = await _storage.read(key: _cookieKey);
       final companyId = await _storage.read(key: _companyIdKey);
       
-      bool needLogin = token == null || token.isEmpty || companyId == null || companyId.isEmpty;
+      if (token == null || token.isEmpty) {
+        debugPrint('🔐 [AuthService] No active token. Skipping silent login.');
+        return;
+      }
+
+      bool needLogin = companyId == null || companyId.isEmpty;
       
       if (!needLogin) {
         // Double check session validity with the backend verify endpoint.
@@ -116,7 +140,7 @@ class AuthService {
       }
 
       if (needLogin) {
-        debugPrint('🔐 [AuthService] No active/valid session. Performing silent background login...');
+        debugPrint('🔐 [AuthService] Session invalid or expired. Performing silent background login...');
         final error = await login('dharunsuperadmin@sustainabyte.ai', '123');
         if (error != null) {
           debugPrint('❌ [AuthService] Silent login failed: $error');
@@ -164,40 +188,75 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>?> getUserData() async {
-    await ensureAuthenticated();
     final raw = await _storage.read(key: _userDataKey);
     if (raw == null) return null;
     return jsonDecode(raw) as Map<String, dynamic>;
   }
 
   static Future<String?> getEmail() async {
-    await ensureAuthenticated();
     return _storage.read(key: _emailKey);
   }
 
   static Future<String?> getCompanyId() async {
-    await ensureAuthenticated();
     return _storage.read(key: _companyIdKey);
   }
 
   static Future<String?> getBucket() async {
-    await ensureAuthenticated();
     return _storage.read(key: _bucketKey);
   }
 
   static Future<String?> getSiteId() async {
-    await ensureAuthenticated();
     return _storage.read(key: _siteIdKey);
   }
 
   static Future<String?> getZoneId() async {
-    await ensureAuthenticated();
     return _storage.read(key: _zoneIdKey);
   }
 
   static Future<bool> hasStoredSession() async {
     final c = await _storage.read(key: _cookieKey);
     return c != null && c.isNotEmpty;
+  }
+
+  /// Extract the active company ID from saved user data.
+  static String? extractCompanyId(Map<String, dynamic>? userData) {
+    if (userData == null) return null;
+    final companyField = userData['company'] ?? userData['Company'];
+    if (companyField == null) return null;
+
+    if (companyField is List && companyField.isNotEmpty) {
+      return companyField.first?.toString();
+    }
+
+    if (companyField is String) {
+      if (companyField.trim().startsWith('[')) {
+        try {
+          final parsed = jsonDecode(companyField) as List?;
+          if (parsed != null && parsed.isNotEmpty) {
+            return parsed.first?.toString();
+          }
+        } catch (_) {
+          return companyField;
+        }
+      }
+      return companyField;
+    }
+
+    return companyField.toString();
+  }
+
+  /// Extracts the bucket value from saved user data.
+  static String? extractBucket(Map<String, dynamic>? userData) {
+    if (userData == null) return null;
+    return userData['Bucket']?.toString() ?? userData['bucket']?.toString();
+  }
+
+  /// Extracts the company display name from saved user data.
+  static String? extractCompanyName(Map<String, dynamic>? userData) {
+    if (userData == null) return null;
+    return userData['companyName']?.toString() ??
+        userData['CompanyName']?.toString() ??
+        userData['company_name']?.toString();
   }
 
   static Future<void> logout() async {
@@ -211,5 +270,103 @@ class AuthService {
 
     // Also clear the general cache (SharedPreferences)
     await LocalCacheService.clearAll();
+  }
+
+  /// Temporarily override the active company/bucket context
+  /// (used by Platform Admin when drilling into a specific company).
+  static Future<void> setTemporaryContext({
+    required String companyId,
+    required String bucket,
+  }) async {
+    await _storage.write(key: _companyIdKey, value: companyId);
+    await _storage.write(key: _bucketKey, value: bucket);
+  }
+
+  /// Extract the role string from user data JSON.
+  static String roleFromUserData(Map<String, dynamic>? userData) {
+    if (userData == null) return '';
+    return (userData['role'] ?? userData['userRole'] ?? '').toString().trim();
+  }
+
+  /// Check if the given role is a platform-level admin.
+  static bool isPlatformAdminRole(String role) {
+    final r = role.toLowerCase().trim();
+    return r == 'platformadmin' ||
+        r == 'platform_admin' ||
+        r == 'superadmin' ||
+        r == 'super_admin' ||
+        r == 'platform admin';
+  }
+
+  /// Check if the given role is a company-level admin (includes site `admin` role).
+  static bool isCompanyAdminRole(String role) {
+    final r = role.toLowerCase().trim();
+    return r == 'companyadmin' ||
+        r == 'company_admin' ||
+        r == 'company admin' ||
+        r == 'admin';
+  }
+
+  /// Check if the given role is a site-level admin ("admin" role with a site assigned).
+  static bool isAdminRole(String role) {
+    final r = role.toLowerCase().trim();
+    return r == 'admin';
+  }
+
+  /// Check if the given role is a site-level admin (explicit siteadmin variants only).
+  static bool isSiteAdminRole(String role) {
+    final r = role.toLowerCase().trim();
+    return r == 'siteadmin' ||
+        r == 'site_admin' ||
+        r == 'site admin';
+  }
+
+  /// Persist the active site/company context before opening the employee dashboard.
+  static Future<void> setSelectedSiteAndCompany(
+    String siteId,
+    String companyId, {
+    String? zoneId,
+    String? bucket,
+  }) async {
+    await _storage.write(key: _siteIdKey, value: siteId);
+    await _storage.write(key: _companyIdKey, value: companyId);
+    if (zoneId != null && zoneId.isNotEmpty) {
+      await _storage.write(key: _zoneIdKey, value: zoneId);
+    }
+    if (bucket != null && bucket.isNotEmpty) {
+      await _storage.write(key: _bucketKey, value: bucket);
+    }
+    debugPrint('✅ [AuthService] Selected site=$siteId company=$companyId zone=$zoneId');
+  }
+
+  /// Check if the company has access to an AC Monitoring System.
+  static Future<bool> checkAcSystemAccess(String companyId) async {
+    try {
+      final token = await _storage.read(key: _cookieKey);
+      if (token == null || token.isEmpty) return false;
+
+      final url = '${AppConfig.provisionBaseUrl}/systems/check-ac-access?companyId=${Uri.encodeComponent(companyId)}';
+      debugPrint('📡 [AuthService] GET $url');
+
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Cookie': 'auth_token=$token',
+          'Content-Type': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body);
+        if (body is Map && body['hasAcSystem'] == true) {
+          return true;
+        }
+      }
+      return false;
+    } catch (e) {
+      debugPrint('❌ [AuthService] checkAcSystemAccess error: $e');
+      return false;
+    }
   }
 }

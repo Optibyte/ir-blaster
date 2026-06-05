@@ -11,6 +11,29 @@ class ModeSelectionPage extends StatefulWidget {
 }
 
 class _ModeSelectionPageState extends State<ModeSelectionPage> {
+  String? _userEmail;
+  String _userName = 'Sustainabyte User';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    try {
+      final email = await AuthService.getEmail();
+      final userData = await AuthService.getUserData();
+      if (mounted) {
+        setState(() {
+          _userEmail = email;
+          _userName = userData?['name'] ?? 'Sustainabyte User';
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading user data in mode selection page: $e');
+    }
+  }
 
   Future<void> _handleForgotPassword() async {
     final TextEditingController emailController = TextEditingController();
@@ -328,35 +351,22 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
             ),
           ),
           const SizedBox(height: 10),
-          FutureBuilder<String?>(
-            future: AuthService.getEmail(),
-            builder: (context, snapshot) {
-              if (snapshot.hasData && snapshot.data != null) {
-                return Text(
-                  snapshot.data!,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Colors.white70,
-                  ),
-                );
-              }
-              return const SizedBox.shrink();
-            },
-          ),
+          if (_userEmail != null)
+            Text(
+              _userEmail!,
+              style: const TextStyle(
+                fontSize: 14,
+                color: Colors.white70,
+              ),
+            ),
           const SizedBox(height: 6),
-          FutureBuilder<Map<String, dynamic>?>(
-            future: AuthService.getUserData(),
-            builder: (context, snapshot) {
-              final name = snapshot.data?['name'] ?? 'Sustainabyte User';
-              return Text(
-                name,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              );
-            },
+          Text(
+            _userName,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
           ),
           const SizedBox(height: 4),
           const Text(

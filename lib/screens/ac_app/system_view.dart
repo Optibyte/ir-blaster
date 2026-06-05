@@ -36,7 +36,6 @@ class _SystemViewPageState extends State<SystemViewPage> {
     final bucket = await AuthService.getBucket() ?? '';
     final token = await AuthService.getCookieHeader() ?? '';
 
-    // Reverting to /systems endpoint as per user's latest instruction
     final apiUrl = '${AppConfig.provisionBaseUrl}/systems'
         '?companyId=$companyId&siteId=$siteId';
 
@@ -65,15 +64,10 @@ class _SystemViewPageState extends State<SystemViewPage> {
                       ?.toLowerCase() ??
                   '';
 
-          final systemShortId = (item['shortId'] ??
-                      item['ShortId'] ??
-                      item['systemShortId'] ??
-                      item['SystemShortId'] as String?)
-                  ?.toLowerCase() ??
-              '';
-          // Trust the API's filtering by bucket/site/company.
-          // If the API returns a system, we display it.
-          return true;
+          // Only show AC Monitoring systems
+          return typeName.contains('ac monitoring') ||
+              typeName.contains('ac_monitoring') ||
+              typeName.contains('acmonitoring');
         }).map((item) {
           final name = (item['name'] ??
                   item['Name'] ??
@@ -94,7 +88,7 @@ class _SystemViewPageState extends State<SystemViewPage> {
               as Map<String, dynamic>?;
           final typeName =
               (systemType?['name'] ?? systemType?['Name']) as String? ??
-                  'AC System';
+                  'AC Monitoring System';
 
           debugPrint(
               '✅ [SystemView] Mapped System: $name ($id) with shortId: $shortId');
@@ -109,22 +103,6 @@ class _SystemViewPageState extends State<SystemViewPage> {
           );
         }).toList();
 
-        // Add hardcoded "TESTIR" as requested
-        final bool alreadyExists = filteredSystems.any(
-            (s) => s.systemId == 'Sustainabyte_testir' || s.title.contains('TESTIR'));
-        if (!alreadyExists) {
-          filteredSystems.insert(
-              0,
-              SystemItem(
-                title: "TESTIR",
-                originalName: "TESTIR",
-                equipment: "AC MONITORING",
-                systemId: "Sustainabyte_testir",
-                systemShortId: "Sustainabyte_testir",
-                iconColor: const Color(0xFF6CC042),
-              ));
-        }
-
         if (mounted) {
           widget.onCountChanged?.call(filteredSystems.length);
           setState(() {
@@ -134,19 +112,9 @@ class _SystemViewPageState extends State<SystemViewPage> {
         }
       } else {
         if (mounted) {
-          final fallbackSystems = [
-            SystemItem(
-              title: "TESTIR",
-              originalName: "TESTIR",
-              equipment: "AC MONITORING",
-              systemId: "Sustainabyte_testir",
-              systemShortId: "Sustainabyte_testir",
-              iconColor: const Color(0xFF6CC042),
-            )
-          ];
-          widget.onCountChanged?.call(fallbackSystems.length);
+          widget.onCountChanged?.call(0);
           setState(() {
-            systems = fallbackSystems;
+            systems = [];
             isLoading = false;
           });
         }
@@ -154,19 +122,9 @@ class _SystemViewPageState extends State<SystemViewPage> {
     } catch (e) {
       debugPrint('❌ [SystemView] Error: $e');
       if (mounted) {
-        final fallbackSystems = [
-          SystemItem(
-            title: "TESTIR",
-            originalName: "TESTIR",
-            equipment: "AC MONITORING",
-            systemId: "Sustainabyte_testir",
-            systemShortId: "Sustainabyte_testir",
-            iconColor: const Color(0xFF6CC042),
-          )
-        ];
-        widget.onCountChanged?.call(fallbackSystems.length);
+        widget.onCountChanged?.call(0);
         setState(() {
-          systems = fallbackSystems;
+          systems = [];
           isLoading = false;
         });
       }

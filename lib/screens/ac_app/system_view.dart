@@ -137,9 +137,10 @@ class _SystemViewPageState extends State<SystemViewPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF120E1F), // Deep Dark Purple Background
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF120E1F) : Colors.white, // Theme background
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -207,16 +208,24 @@ class _SystemCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = isDark ? const Color(0xFF1E1A2D) : const Color(0xFFF3F7FA);
+    final borderColor = isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05);
+    final textColor = isDark ? Colors.white : const Color(0xFF1B172E);
+    final pillBg = isDark ? const Color(0xFF0E0B16) : Colors.white;
+    final pillBorder = isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.08);
+    final pillText = isDark ? Colors.white.withOpacity(0.9) : const Color(0xFF1B172E);
+
     return GestureDetector(
       onTap: () => onViewPressed(
           system.systemId, system.originalName, system.systemShortId),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: const Color(0xFF1E1A2D), // Lighter Purple Card Background
+          color: cardColor, // Dynamic Card Background
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: Colors.white.withOpacity(0.08),
+            color: borderColor,
             width: 1,
           ),
         ),
@@ -247,7 +256,7 @@ class _SystemCard extends StatelessWidget {
                   Text(
                     system.equipment,
                     style: GoogleFonts.outfit(
-                      color: Colors.white,
+                      color: textColor,
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
                     ),
@@ -258,14 +267,14 @@ class _SystemCard extends StatelessWidget {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0E0B16), // Dark Pill
+                      color: pillBg, // Dynamic Pill
                       borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: Colors.white.withOpacity(0.05)),
+                      border: Border.all(color: pillBorder),
                     ),
                     child: Text(
                       system.originalName,
                       style: GoogleFonts.outfit(
-                        color: Colors.white.withOpacity(0.9),
+                        color: pillText,
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),

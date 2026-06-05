@@ -147,6 +147,12 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
   }
 
   Widget _buildHomeContent() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = isDark ? const Color(0xFF2D2D44) : const Color(0xFFF3F7FA);
+    final textColor = isDark ? Colors.white : const Color(0xFF1B172E);
+    final textSecondaryColor = isDark ? Colors.white70 : const Color(0xFF5A6E85);
+    final iconColor = isDark ? Colors.white70 : const Color(0xFF1B172E);
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -233,7 +239,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
 
           // CONFIGURATION MODE CARD
           Card(
-            color: const Color(0xFF2D2D44),
+            color: cardColor,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
@@ -269,27 +275,27 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
+                        children: [
                           Text(
                             "Configuration Mode",
                             style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.bold,
-                              color: Colors.white,
+                              color: textColor,
                             ),
                           ),
-                          SizedBox(height: 4),
+                          const SizedBox(height: 4),
                           Text(
                             "• Connect to device via Bluetooth\n",
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.white70,
+                              color: textSecondaryColor,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const Icon(Icons.chevron_right, color: Colors.white70),
+                    Icon(Icons.chevron_right, color: textSecondaryColor),
                   ],
                 ),
               ),
@@ -300,7 +306,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
 
           // CLOUD CONTROL INFO CARD (no MQTT config here, only information)
           Card(
-            color: const Color(0xFF2D2D44),
+            color: cardColor,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
@@ -309,12 +315,12 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
               padding: const EdgeInsets.all(16),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
+                children: [
                   Icon(
                     Icons.cloud_queue,
-                    color: Colors.white70,
+                    color: iconColor,
                   ),
-                  SizedBox(width: 10),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       "Cloud Control (MQTT) is available after:\n"
@@ -323,7 +329,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
                       "3. MQTT is set in the separate MQTT page.",
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.white70,
+                        color: textSecondaryColor,
                       ),
                     ),
                   ),
@@ -337,68 +343,75 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
   }
 
   Widget _buildProfileContent() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = isDark ? const Color(0xFF2D2D44) : const Color(0xFFF3F7FA);
+    final textColor = isDark ? Colors.white : const Color(0xFF1B172E);
+    final textSecondaryColor = isDark ? Colors.white70 : const Color(0xFF5A6E85);
+    final iconColor = isDark ? Colors.white70 : const Color(0xFF1B172E);
+    final dividerColor = isDark ? Colors.white24 : Colors.black12;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          const CircleAvatar(
+          CircleAvatar(
             radius: 38,
-            backgroundColor: Color(0xFF2D2D44),
+            backgroundColor: cardColor,
             child: Icon(
               Icons.person,
               size: 40,
-              color: Colors.white70,
+              color: textSecondaryColor,
             ),
           ),
           const SizedBox(height: 10),
           if (_userEmail != null)
             Text(
               _userEmail!,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 14,
-                color: Colors.white70,
+                color: textSecondaryColor,
               ),
             ),
           const SizedBox(height: 6),
           Text(
             _userName,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              color: Colors.white,
+              color: textColor,
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
+          Text(
             "Optibyte Smart AC Control",
             style: TextStyle(
               fontSize: 12,
-              color: Colors.white70,
+              color: textSecondaryColor,
             ),
           ),
           const SizedBox(height: 20),
 
           ListTile(
-            leading: const Icon(Icons.info_outline, color: Colors.white70),
-            title: const Text("App Version", style: TextStyle(color: Colors.white)),
-            subtitle: const Text("Optibyte IR Control v1.0.0", style: TextStyle(color: Colors.white70)),
+            leading: Icon(Icons.info_outline, color: iconColor),
+            title: Text("App Version", style: TextStyle(color: textColor)),
+            subtitle: Text("Optibyte IR Control v1.0.0", style: TextStyle(color: textSecondaryColor)),
             onTap: () {},
           ),
-          const Divider(height: 1, color: Colors.white24),
+          Divider(height: 1, color: dividerColor),
           ListTile(
-            leading: const Icon(Icons.business, color: Colors.white70),
-            title: const Text("Company", style: TextStyle(color: Colors.white)),
-            subtitle: const Text("Sustainabyte Technologies Pvt Ltd", style: TextStyle(color: Colors.white70)),
+            leading: Icon(Icons.business, color: iconColor),
+            title: Text("Company", style: TextStyle(color: textColor)),
+            subtitle: Text("Sustainabyte Technologies Pvt Ltd", style: TextStyle(color: textSecondaryColor)),
             onTap: () {},
           ),
-          const Divider(height: 1, color: Colors.white24),
+          Divider(height: 1, color: dividerColor),
           ListTile(
-            leading: const Icon(Icons.mail_outline, color: Colors.white70),
-            title: const Text("Support", style: TextStyle(color: Colors.white)),
-            subtitle: const Text("support@sustainabyte.com", style: TextStyle(color: Colors.white70)),
+            leading: Icon(Icons.mail_outline, color: iconColor),
+            title: Text("Support", style: TextStyle(color: textColor)),
+            subtitle: Text("support@sustainabyte.com", style: TextStyle(color: textSecondaryColor)),
             onTap: () {},
           ),
-          const Divider(height: 1, color: Colors.white24),
+          Divider(height: 1, color: dividerColor),
           const SizedBox(height: 16),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -446,16 +459,21 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDark ? const Color(0xFF1A1A2E) : Colors.white;
+    final textColor = isDark ? Colors.white : const Color(0xFF1B172E);
+
     return Scaffold(
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: bgColor,
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           "Mode Selection",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(color: textColor, fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
-        backgroundColor: const Color(0xFF1A1A2E),
+        backgroundColor: bgColor,
         elevation: 0,
+        iconTheme: IconThemeData(color: textColor),
       ),
       body: _buildHomeContent(),
     );

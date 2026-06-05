@@ -6,6 +6,9 @@ import 'package:ir_blaster_ac/core/services/admin_service.dart';
 import 'package:ir_blaster_ac/core/services/auth_service.dart';
 import 'package:ir_blaster_ac/screens/main_navigation_page.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import 'package:ir_blaster_ac/core/theme/theme_provider.dart';
 
 class CompanySitesPage extends StatefulWidget {
   final String companyId;
@@ -27,6 +30,16 @@ class _CompanySitesPageState extends State<CompanySitesPage> {
   List<Site> sites = [];
   bool isLoading = true;
   GoogleMapController? _mapController;
+
+  bool _isDarkTheme = true;
+
+  Color get _bgColor => _isDarkTheme ? AppColors.background : Colors.white;
+  Color get _cardColor => _isDarkTheme ? AppColors.secondaryBackground : const Color(0xFFF3F7FA);
+  Color get _textColor => _isDarkTheme ? Colors.white : const Color(0xFF1B172E);
+  Color get _textSecondaryColor => _isDarkTheme ? Colors.white70 : const Color(0xFF5A6E85);
+  Color get _appBarIconColor => _isDarkTheme ? Colors.white : const Color(0xFF1B172E);
+  Color get _dividerColor => _isDarkTheme ? Colors.white12 : Colors.black12;
+  Color get _shadowColor => _isDarkTheme ? Colors.black26 : Colors.black.withValues(alpha: 0.05);
 
   @override
   void initState() {
@@ -179,19 +192,20 @@ class _CompanySitesPageState extends State<CompanySitesPage> {
 
   @override
   Widget build(BuildContext context) {
+    _isDarkTheme = Provider.of<ThemeProvider>(context).isDarkMode;
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: _bgColor,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
+          icon: Icon(Icons.arrow_back_ios_new_rounded, color: _appBarIconColor),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
           widget.companyName,
           style: GoogleFonts.poppins(
-            color: Colors.white,
+            color: _textColor,
             fontWeight: FontWeight.bold,
             fontSize: 18,
           ),
@@ -214,7 +228,7 @@ class _CompanySitesPageState extends State<CompanySitesPage> {
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.2),
+                            color: _shadowColor,
                             blurRadius: 12,
                             offset: const Offset(0, 4),
                           ),
@@ -256,7 +270,7 @@ class _CompanySitesPageState extends State<CompanySitesPage> {
                               mapToolbarEnabled: false,
                               onMapCreated: (controller) {
                                 _mapController = controller;
-                                _mapController?.setMapStyle(_darkMapStyle);
+                                _mapController?.setMapStyle(_isDarkTheme ? _darkMapStyle : null);
                                 Future.delayed(const Duration(milliseconds: 100), () {
                                   _fitMapBounds();
                                 });
@@ -272,7 +286,7 @@ class _CompanySitesPageState extends State<CompanySitesPage> {
                     Text(
                       '${sites.length} ${sites.length == 1 ? "site" : "sites"} found',
                       style: GoogleFonts.poppins(
-                        color: Colors.white54,
+                        color: _textSecondaryColor,
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -304,10 +318,10 @@ class _CompanySitesPageState extends State<CompanySitesPage> {
                             margin: const EdgeInsets.only(bottom: 12),
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF1A172E),
+                              color: _cardColor,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.05),
+                                color: _dividerColor,
                                 width: 1,
                               ),
                             ),
@@ -336,7 +350,7 @@ class _CompanySitesPageState extends State<CompanySitesPage> {
                                       Text(
                                         site.name,
                                         style: GoogleFonts.poppins(
-                                          color: Colors.white,
+                                          color: _textColor,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 15,
                                         ),
@@ -345,7 +359,7 @@ class _CompanySitesPageState extends State<CompanySitesPage> {
                                       Text(
                                         '${site.city ?? "Chennai"}, ${site.state ?? "Tamil Nadu"}',
                                         style: GoogleFonts.poppins(
-                                          color: Colors.white54,
+                                          color: _textSecondaryColor,
                                           fontSize: 12,
                                         ),
                                       ),
@@ -376,11 +390,11 @@ class _CompanySitesPageState extends State<CompanySitesPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: Colors.white12, size: 48),
+            Icon(icon, color: _isDarkTheme ? Colors.white12 : Colors.black12, size: 48),
             const SizedBox(height: 16),
             Text(msg,
                 textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(color: Colors.white54, fontSize: 13)),
+                style: GoogleFonts.poppins(color: _textSecondaryColor, fontSize: 13)),
           ],
         ),
       ),

@@ -92,10 +92,11 @@ class _AuthGateState extends State<_AuthGate> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.error_outline, color: Color.fromARGB(255, 247, 134, 126), size: 48),
+                  const Icon(Icons.error_outline,
+                      color: Color.fromARGB(255, 247, 134, 126), size: 48),
                   const SizedBox(height: 16),
                   Text(
-                     'Connection Error',
+                    'Connection Error',
                     style: GoogleFonts.poppins(
                         fontSize: 18, fontWeight: FontWeight.w600),
                   ),
@@ -134,12 +135,15 @@ class _AuthGateState extends State<_AuthGate> {
             return const CompanyAdminPage();
           } else {
             // Employees / technicians with an assigned site go straight to dashboard
-            final siteId = userData['site']?.toString() ?? userData['siteId']?.toString();
+            final siteId =
+                userData['site']?.toString() ?? userData['siteId']?.toString();
             if (siteId != null && siteId.isNotEmpty) {
               return const MainNavigationPage();
             }
             final companyId = ac_auth.AuthService.extractCompanyId(userData);
-            final companyName = ac_auth.AuthService.extractCompanyName(userData) ?? 'Company Dashboard';
+            final companyName =
+                ac_auth.AuthService.extractCompanyName(userData) ??
+                    'Company Dashboard';
             final bucket = ac_auth.AuthService.extractBucket(userData) ?? '';
             return CompanySitesPage(
               companyId: companyId ?? '',

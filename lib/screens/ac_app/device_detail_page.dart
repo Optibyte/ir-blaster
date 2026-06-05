@@ -163,7 +163,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
     _setupPersistentMqtt();
     // WiFi status caching disabled to prevent stale data flickering
-    // _loadCachedStatus(); 
+    // _loadCachedStatus();
     // _loadCachedEquipments(); // Disabled to prevent loading stale cached equipment list
 
     // Telemetry is no longer "loading" once we have the persistent connection active
@@ -331,10 +331,10 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     if (state == AppLifecycleState.resumed) {
       debugPrint(
           '🔄 [Lifecycle] App resumed! Refreshing MQTT connection & fetching latest equipment data...');
-      
+
       // Re-fetch the equipment data from the live HTTP API to get fresh configuration
       _fetchEquipments();
-      
+
       // Verify/reconnect the MQTT connection silently in the background
       _setupPersistentMqtt();
     }
@@ -404,7 +404,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               Container(
                 height: 0.5,
                 margin: const EdgeInsets.symmetric(horizontal: 24),
-                color: isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.06),
+                color: isDark
+                    ? Colors.white.withOpacity(0.06)
+                    : Colors.black.withOpacity(0.06),
               ),
               // Equipment list
               ConstrainedBox(
@@ -414,7 +416,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                 child: ListView.builder(
                   shrinkWrap: true,
                   physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   itemCount: _equipmentsData.length,
                   itemBuilder: (context, index) {
                     final e = _equipmentsData[index];
@@ -431,12 +434,15 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                             id,
                             name,
                             e['equipmentTypeId']?.toString() ?? '',
-                            (e['shortId'] ?? e['equipmentShortId'])?.toString() ?? '',
+                            (e['shortId'] ?? e['equipmentShortId'])
+                                    ?.toString() ??
+                                '',
                           );
                         },
                         borderRadius: BorderRadius.circular(12),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 14),
                           decoration: BoxDecoration(
                             color: isSelected
                                 ? const Color(0xFF6CC042).withOpacity(0.08)
@@ -452,7 +458,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                                   shape: BoxShape.circle,
                                   color: isSelected
                                       ? const Color(0xFF6CC042)
-                                      : (isDark ? Colors.white12 : Colors.black12),
+                                      : (isDark
+                                          ? Colors.white12
+                                          : Colors.black12),
                                 ),
                               ),
                               const SizedBox(width: 14),
@@ -461,10 +469,16 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                                   name,
                                   style: GoogleFonts.outfit(
                                     color: isSelected
-                                        ? (isDark ? Colors.white : const Color(0xFF1B172E))
-                                        : (isDark ? Colors.white54 : Colors.black45),
+                                        ? (isDark
+                                            ? Colors.white
+                                            : const Color(0xFF1B172E))
+                                        : (isDark
+                                            ? Colors.white54
+                                            : Colors.black45),
                                     fontSize: 15,
-                                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                                    fontWeight: isSelected
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
                                   ),
                                 ),
                               ),
@@ -513,7 +527,10 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         final data = jsonDecode(response.body);
         final dynamic listData = data['data'];
 
-        if (listData != null && listData is List && mounted && listData.isNotEmpty) {
+        if (listData != null &&
+            listData is List &&
+            mounted &&
+            listData.isNotEmpty) {
           final List<dynamic> equipmentList = listData;
           _applyEquipmentData(equipmentList);
           // Save to cache disabled to use only live data
@@ -594,7 +611,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       _selectedEquipmentShortId = shortId;
       _deviceId = deviceId; // Set to IMEI if found, else fallback to shortId
       _isLoadingEquipments = true;
-      _isOnline = false; // Reset to inactive until confirmed by new device status JSON
+      _isOnline =
+          false; // Reset to inactive until confirmed by new device status JSON
       _lastMessageReceivedTime =
           DateTime.now().subtract(const Duration(seconds: 20));
       _isTelemetryLoading = true;
@@ -783,8 +801,10 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         if (isMatchingDevice) {
           // Efficiently reset watchdog by simply updating the timestamp
           _lastMessageReceivedTime = DateTime.now();
-          _lastMqttUpdateTime = (p['time'] ?? data['time'] ?? 
-              DateTime.now().toString().split('.').first.split(' ').last).toString();
+          _lastMqttUpdateTime = (p['time'] ??
+                  data['time'] ??
+                  DateTime.now().toString().split('.').first.split(' ').last)
+              .toString();
           hasChanges = true;
 
           if (p['temp'] != null || p['current_temp'] != null) {
@@ -804,18 +824,23 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           }
 
           // WiFi/Online status is exclusively driven by the "status" field in this status topic JSON payload
-          final String jsonStatus = (p['status'] ?? data['status'] ?? '').toString().trim().toUpperCase();
+          final String jsonStatus = (p['status'] ?? data['status'] ?? '')
+              .toString()
+              .trim()
+              .toUpperCase();
           final bool wasOnline = _isOnline;
           if (jsonStatus == 'ACTIVE') {
             _isOnline = true;
             _inactiveStartTime = null;
-            debugPrint('📡 [MQTT status topic JSON] Status ACTIVE received -> WiFi ON');
+            debugPrint(
+                '📡 [MQTT status topic JSON] Status ACTIVE received -> WiFi ON');
           } else {
             _isOnline = false;
             if (wasOnline) {
               _inactiveStartTime = DateTime.now();
             }
-            debugPrint('📡 [MQTT status topic JSON] Status is INACTIVE ($jsonStatus) -> WiFi OFF');
+            debugPrint(
+                '📡 [MQTT status topic JSON] Status is INACTIVE ($jsonStatus) -> WiFi OFF');
           }
           hasChanges = true;
 
@@ -1838,7 +1863,6 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     );
   }
 
-
   Widget _actionPill({
     required IconData icon,
     required String label,
@@ -1880,10 +1904,6 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     );
   }
 
-
-
-
-
   Widget _buildPrimaryControls(bool isDark) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -1900,13 +1920,17 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                   decoration: BoxDecoration(
                     color: (_isAnalyzing
                             ? Colors.amber
-                            : (_isOnline ? const Color(0xFF6CC042) : const Color(0xFFEF4444)))
+                            : (_isOnline
+                                ? const Color(0xFF6CC042)
+                                : const Color(0xFFEF4444)))
                         .withOpacity(0.12),
                     shape: BoxShape.circle,
                     border: Border.all(
                       color: (_isAnalyzing
                               ? Colors.amber
-                              : (_isOnline ? const Color(0xFF6CC042) : const Color(0xFFEF4444)))
+                              : (_isOnline
+                                  ? const Color(0xFF6CC042)
+                                  : const Color(0xFFEF4444)))
                           .withOpacity(0.3),
                       width: 1,
                     ),
@@ -1914,10 +1938,14 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                   child: Icon(
                     _isAnalyzing
                         ? Icons.wifi_protected_setup_rounded
-                        : (_isOnline ? Icons.wifi_rounded : Icons.wifi_off_rounded),
+                        : (_isOnline
+                            ? Icons.wifi_rounded
+                            : Icons.wifi_off_rounded),
                     color: _isAnalyzing
                         ? Colors.amber
-                        : (_isOnline ? const Color(0xFF6CC042) : const Color(0xFFEF4444)),
+                        : (_isOnline
+                            ? const Color(0xFF6CC042)
+                            : const Color(0xFFEF4444)),
                     size: 14,
                   ),
                 ),
@@ -1943,7 +1971,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                   decoration: BoxDecoration(
                     color: _isAnalyzing
                         ? Colors.amber
-                        : (_isOnline ? const Color(0xFF6CC042) : const Color(0xFFEF4444)),
+                        : (_isOnline
+                            ? const Color(0xFF6CC042)
+                            : const Color(0xFFEF4444)),
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -1953,7 +1983,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                 text: _isAnalyzing
                     ? 'Analyzing connection stability...'
                     : (_isOnline
-                        ? (_savedSsid.isNotEmpty ? _savedSsid : 'Active Connection')
+                        ? (_savedSsid.isNotEmpty
+                            ? _savedSsid
+                            : 'Active Connection')
                         : 'Disconnected'),
                 style: GoogleFonts.poppins(
                   color: Colors.white60,
@@ -1978,7 +2010,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             border: Border.all(
               color: (_isAnalyzing
                       ? Colors.amber
-                      : (_isOnline ? const Color(0xFF6CC042) : const Color(0xFFEF4444)))
+                      : (_isOnline
+                          ? const Color(0xFF6CC042)
+                          : const Color(0xFFEF4444)))
                   .withOpacity(0.4),
               width: 1.5,
             ),
@@ -1986,7 +2020,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               BoxShadow(
                 color: (_isAnalyzing
                         ? Colors.amber
-                        : (_isOnline ? const Color(0xFF6CC042) : const Color(0xFFEF4444)))
+                        : (_isOnline
+                            ? const Color(0xFF6CC042)
+                            : const Color(0xFFEF4444)))
                     .withOpacity(0.2),
                 blurRadius: 16,
                 spreadRadius: 2,
@@ -2008,12 +2044,14 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             isActive: true,
             activeColor: _isAnalyzing
                 ? Colors.amber
-                : (_isOnline ? const Color(0xFF6CC042) : const Color(0xFFEF4444)),
+                : (_isOnline
+                    ? const Color(0xFF6CC042)
+                    : const Color(0xFFEF4444)),
             isDark: isDark,
             onTap: () {
               // Trigger elegant tooltip on single tap
               _wifiTooltipKey.currentState?.ensureTooltipVisible();
-              
+
               if (!_isOnline) {
                 debugPrint('🔄 [MQTT] User requested WiFi re-sync');
                 _setupPersistentMqtt();
@@ -2243,13 +2281,17 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                     decoration: BoxDecoration(
                       color: _isAnalyzing
                           ? Colors.amber
-                          : (_isOnline ? const Color(0xFF6CC042) : Colors.redAccent),
+                          : (_isOnline
+                              ? const Color(0xFF6CC042)
+                              : Colors.redAccent),
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
                           color: (_isAnalyzing
                                   ? Colors.amber
-                                  : (_isOnline ? const Color(0xFF6CC042) : Colors.redAccent))
+                                  : (_isOnline
+                                      ? const Color(0xFF6CC042)
+                                      : Colors.redAccent))
                               .withOpacity(0.4),
                           blurRadius: 4,
                           spreadRadius: 1,
@@ -2331,7 +2373,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           ),
           const SizedBox(height: 10),
           Divider(
-            color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05),
+            color: isDark
+                ? Colors.white.withOpacity(0.05)
+                : Colors.black.withOpacity(0.05),
             height: 1,
           ),
           const SizedBox(height: 6),
@@ -2454,7 +2498,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                     CircularProgressIndicator(
                       value: _humidity / 100,
                       strokeWidth: 3,
-                      backgroundColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+                      backgroundColor: isDark
+                          ? Colors.white10
+                          : Colors.black.withOpacity(0.05),
                       valueColor: AlwaysStoppedAnimation<Color>(comfortColor),
                     ),
                     Icon(
@@ -2485,7 +2531,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           ),
           const SizedBox(height: 10),
           Divider(
-            color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05),
+            color: isDark
+                ? Colors.white.withOpacity(0.05)
+                : Colors.black.withOpacity(0.05),
             height: 1,
           ),
           const SizedBox(height: 6),
@@ -2535,9 +2583,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         color: isDark ? const Color(0xFF26213A) : Colors.white,
         borderRadius: BorderRadius.circular(28),
         border: Border.all(
-          color: isDark
-              ? Colors.white.withOpacity(0.05)
-              : const Color(0xFFE2E8F0),
+          color:
+              isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFE2E8F0),
         ),
         boxShadow: [
           if (!isDark)
@@ -2592,23 +2639,26 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             )
           else
             Column(
-              children: List.generate(_dynamicSchedules.length, (index) {
+              children: List.generate(math.min(5, _dynamicSchedules.length), (index) {
                 final schedule = _dynamicSchedules[index];
                 final String onTime = schedule['on'] ?? '--:--';
                 final String offTime = schedule['off'] ?? '--:--';
-                
+
                 // A routine is scheduled if it has a valid time setting
                 final bool isScheduled = onTime != '--:--' &&
                     offTime != '--:--' &&
                     onTime.toUpperCase() != 'DISABLED' &&
                     offTime.toUpperCase() != 'DISABLED';
-                
-                final bool isLast = index == _dynamicSchedules.length - 1;
-                
+
+                final bool isLast = index == math.min(5, _dynamicSchedules.length) - 1;
+
                 // Use a single premium, consistent brand color for all active timeline elements
-                const Color themeColor = Color(0xFF3B82F6); // Gorgeous electric blue
-                const Color activeOnColor = Color(0xFF6CC042); // Premium green for ON
-                const Color activeOffColor = Color(0xFFEF4444); // Premium red for OFF
+                const Color themeColor =
+                    Color(0xFF3B82F6); // Gorgeous electric blue
+                const Color activeOnColor =
+                    Color(0xFF6CC042); // Premium green for ON
+                const Color activeOffColor =
+                    Color(0xFFEF4444); // Premium red for OFF
 
                 // Check if previous schedule is scheduled to color the top connecting line segment
                 bool isPrevScheduled = false;
@@ -2624,7 +2674,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
                 // Check if next schedule is scheduled to color the bottom connecting line segment
                 bool isNextScheduled = false;
-                if (index < _dynamicSchedules.length - 1) {
+                if (index < math.min(5, _dynamicSchedules.length) - 1) {
                   final nextSchedule = _dynamicSchedules[index + 1];
                   final String nextOn = nextSchedule['on'] ?? '--:--';
                   final String nextOff = nextSchedule['off'] ?? '--:--';
@@ -2654,7 +2704,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                                           ? themeColor.withOpacity(0.5)
                                           : (isDark
                                               ? Colors.white.withOpacity(0.06)
-                                              : Colors.black.withOpacity(0.06))),
+                                              : Colors.black
+                                                  .withOpacity(0.06))),
                                 ),
                               ),
                               // Timeline Node (Outer ring + filled center dot)
@@ -2710,7 +2761,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                                           ? themeColor.withOpacity(0.5)
                                           : (isDark
                                               ? Colors.white.withOpacity(0.06)
-                                              : Colors.black.withOpacity(0.06))),
+                                              : Colors.black
+                                                  .withOpacity(0.06))),
                                 ),
                               ),
                             ],
@@ -2730,7 +2782,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                                     'SCHEDULE ${index + 1}',
                                     style: GoogleFonts.outfit(
                                       color: isScheduled
-                                          ? (isDark ? Colors.white : Colors.black87)
+                                          ? (isDark
+                                              ? Colors.white
+                                              : Colors.black87)
                                           : (isDark
                                               ? Colors.white30
                                               : Colors.black38),
@@ -2760,8 +2814,10 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                                     child: Text(
                                       isScheduled
                                           ? (schedule['interval'] != null &&
-                                                  schedule['interval'] != 'None' &&
-                                                  schedule['interval']!.isNotEmpty
+                                                  schedule['interval'] !=
+                                                      'None' &&
+                                                  schedule['interval']!
+                                                      .isNotEmpty
                                               ? 'Interval: ${schedule['interval']!.replaceAll(' mins', 'm').replaceAll(' hour', 'h').replaceAll('s', '')}'
                                               : 'Interval')
                                           : 'Interval',
@@ -2783,11 +2839,17 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                               // Row 2: Time chips side-by-side
                               Row(
                                 children: [
-                                  _timeChip('ON', onTime,
-                                      isScheduled ? activeOnColor : null, isDark),
+                                  _timeChip(
+                                      'ON',
+                                      onTime,
+                                      isScheduled ? activeOnColor : null,
+                                      isDark),
                                   const SizedBox(width: 8),
-                                  _timeChip('OFF', offTime,
-                                      isScheduled ? activeOffColor : null, isDark),
+                                  _timeChip(
+                                      'OFF',
+                                      offTime,
+                                      isScheduled ? activeOffColor : null,
+                                      isDark),
                                 ],
                               ),
                             ],
@@ -2811,17 +2873,19 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
     final Color chipBgColor = isActive
         ? activeColor.withOpacity(0.08)
-        : (isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.02));
+        : (isDark
+            ? Colors.white.withOpacity(0.02)
+            : Colors.black.withOpacity(0.02));
     final Color chipBorderColor = isActive
         ? activeColor.withOpacity(0.2)
-        : (isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03));
-    final Color textColor = isActive
-        ? activeColor
-        : (isDark ? Colors.white30 : Colors.black38);
+        : (isDark
+            ? Colors.white.withOpacity(0.05)
+            : Colors.black.withOpacity(0.03));
+    final Color textColor =
+        isActive ? activeColor : (isDark ? Colors.white30 : Colors.black38);
 
-    final IconData icon = label == 'ON'
-        ? Icons.play_arrow_rounded
-        : Icons.stop_rounded;
+    final IconData icon =
+        label == 'ON' ? Icons.play_arrow_rounded : Icons.stop_rounded;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -2840,7 +2904,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             icon,
             size: 12,
             color: isActive
-                ? (label == 'ON' ? const Color(0xFF6CC042) : const Color(0xFFEF4444))
+                ? (label == 'ON'
+                    ? const Color(0xFF6CC042)
+                    : const Color(0xFFEF4444))
                 : textColor.withOpacity(0.4),
           ),
           const SizedBox(width: 4),
@@ -2927,8 +2993,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                 const Spacer(),
                 // 1H Duration Badge
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.orange.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
@@ -2956,7 +3022,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                     shape: BoxShape.circle,
                     color: isScheduled
                         ? Colors.amber
-                        : (isDark ? Colors.white.withOpacity(0.04) : Colors.black.withOpacity(0.04)),
+                        : (isDark
+                            ? Colors.white.withOpacity(0.04)
+                            : Colors.black.withOpacity(0.04)),
                     border: Border.all(
                       color: isScheduled
                           ? Colors.amber
@@ -3016,7 +3084,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                     shape: BoxShape.circle,
                     color: isScheduled
                         ? Colors.orange
-                        : (isDark ? Colors.white.withOpacity(0.04) : Colors.black.withOpacity(0.04)),
+                        : (isDark
+                            ? Colors.white.withOpacity(0.04)
+                            : Colors.black.withOpacity(0.04)),
                     border: Border.all(
                       color: isScheduled
                           ? Colors.orange
@@ -3141,43 +3211,52 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             setState(() {
               _dynamicSchedules.clear();
               _dynamicSchedules.addAll(updatedSchedules);
+              while (_dynamicSchedules.length < 6) {
+                _dynamicSchedules.add({'on': '--:--', 'off': '--:--', 'interval': 'None'});
+              }
 
               // Map back to backward-compatible individual variables if needed
               if (_dynamicSchedules.isNotEmpty) {
                 _scheduleOn1 = _dynamicSchedules[0]['on'] ?? '--:--';
                 _scheduleOff1 = _dynamicSchedules[0]['off'] ?? '--:--';
               } else {
-                _scheduleOn1 = '--:--'; _scheduleOff1 = '--:--';
+                _scheduleOn1 = '--:--';
+                _scheduleOff1 = '--:--';
               }
               if (_dynamicSchedules.length > 1) {
                 _scheduleOn2 = _dynamicSchedules[1]['on'] ?? '--:--';
                 _scheduleOff2 = _dynamicSchedules[1]['off'] ?? '--:--';
               } else {
-                _scheduleOn2 = '--:--'; _scheduleOff2 = '--:--';
+                _scheduleOn2 = '--:--';
+                _scheduleOff2 = '--:--';
               }
               if (_dynamicSchedules.length > 2) {
                 _scheduleOn3 = _dynamicSchedules[2]['on'] ?? '--:--';
                 _scheduleOff3 = _dynamicSchedules[2]['off'] ?? '--:--';
               } else {
-                _scheduleOn3 = '--:--'; _scheduleOff3 = '--:--';
+                _scheduleOn3 = '--:--';
+                _scheduleOff3 = '--:--';
               }
               if (_dynamicSchedules.length > 3) {
                 _scheduleOn4 = _dynamicSchedules[3]['on'] ?? '--:--';
                 _scheduleOff4 = _dynamicSchedules[3]['off'] ?? '--:--';
               } else {
-                _scheduleOn4 = '--:--'; _scheduleOff4 = '--:--';
+                _scheduleOn4 = '--:--';
+                _scheduleOff4 = '--:--';
               }
               if (_dynamicSchedules.length > 4) {
                 _scheduleOn5 = _dynamicSchedules[4]['on'] ?? '--:--';
                 _scheduleOff5 = _dynamicSchedules[4]['off'] ?? '--:--';
               } else {
-                _scheduleOn5 = '--:--'; _scheduleOff5 = '--:--';
+                _scheduleOn5 = '--:--';
+                _scheduleOff5 = '--:--';
               }
               if (_dynamicSchedules.length > 5) {
                 _scheduleOn6 = _dynamicSchedules[5]['on'] ?? '--:--';
                 _scheduleOff6 = _dynamicSchedules[5]['off'] ?? '--:--';
               } else {
-                _scheduleOn6 = '--:--'; _scheduleOff6 = '--:--';
+                _scheduleOn6 = '--:--';
+                _scheduleOff6 = '--:--';
               }
 
               _lunchOn = updatedLunch['on'] ?? '--:--';
@@ -3186,46 +3265,66 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
             // 1. Check if user clicked common delete all schedules
             if (hasClearedAll) {
-              _publishMqttCommand('SCH_CLEAR', topic: _getDeviceTopic('schedule'), allowOffline: true);
+              _publishMqttCommand('SCH_CLEAR',
+                  topic: _getDeviceTopic('schedule'), allowOffline: true);
             } else {
               // Helper to normalize --:-- and DISABLED to 'DISABLED' for clean comparison
               String normalize(String? val) {
-                if (val == null || val == '--:--' || val.toUpperCase() == 'DISABLED') {
+                if (val == null ||
+                    val == '--:--' ||
+                    val.toUpperCase() == 'DISABLED') {
                   return 'DISABLED';
                 }
                 return val.trim();
               }
 
               // 2. Publish daily schedules (only send commands if the values changed!)
-              final maxSchedules = math.max(originalSchedules.length, updatedSchedules.length);
+              final maxSchedules =
+                  math.max(originalSchedules.length, updatedSchedules.length);
               for (int i = 0; i < maxSchedules; i++) {
                 final idx = i + 1;
-                
-                final String origOn = i < originalSchedules.length ? normalize(originalSchedules[i]['on']) : 'DISABLED';
-                final String origOff = i < originalSchedules.length ? normalize(originalSchedules[i]['off']) : 'DISABLED';
-                
-                final String newOn = i < updatedSchedules.length ? normalize(updatedSchedules[i]['on']) : 'DISABLED';
-                final String newOff = i < updatedSchedules.length ? normalize(updatedSchedules[i]['off']) : 'DISABLED';
+
+                final String origOn = i < originalSchedules.length
+                    ? normalize(originalSchedules[i]['on'])
+                    : 'DISABLED';
+                final String origOff = i < originalSchedules.length
+                    ? normalize(originalSchedules[i]['off'])
+                    : 'DISABLED';
+
+                final String newOn = i < updatedSchedules.length
+                    ? normalize(updatedSchedules[i]['on'])
+                    : 'DISABLED';
+                final String newOff = i < updatedSchedules.length
+                    ? normalize(updatedSchedules[i]['off'])
+                    : 'DISABLED';
 
                 if (newOn == 'DISABLED' && newOff == 'DISABLED') {
                   // If it is now cleared/disabled but was previously active, send SCH_CLEAR$idx
                   if (origOn != 'DISABLED' || origOff != 'DISABLED') {
-                    _publishMqttCommand('SCH_CLEAR$idx', topic: _getDeviceTopic('schedule'), allowOffline: true);
+                    _publishMqttCommand('SCH_CLEAR$idx',
+                        topic: _getDeviceTopic('schedule'), allowOffline: true);
                   }
                 } else {
                   // If it is active, publish the specific changed times
                   if (newOn != origOn) {
-                    _publishMqttCommand('SCH_ON$idx:$newOn', topic: _getDeviceTopic('schedule'), allowOffline: true);
+                    _publishMqttCommand('SCH_ON$idx:$newOn',
+                        topic: _getDeviceTopic('schedule'), allowOffline: true);
                   }
                   if (newOff != origOff) {
-                    _publishMqttCommand('SCH_OFF$idx:$newOff', topic: _getDeviceTopic('schedule'), allowOffline: true);
+                    _publishMqttCommand('SCH_OFF$idx:$newOff',
+                        topic: _getDeviceTopic('schedule'), allowOffline: true);
                   }
 
                   // Publish interval if changed
-                  final String origInt = i < originalSchedules.length ? (originalSchedules[i]['interval'] ?? 'None') : 'None';
-                  final String newInt = i < updatedSchedules.length ? (updatedSchedules[i]['interval'] ?? 'None') : 'None';
+                  final String origInt = i < originalSchedules.length
+                      ? (originalSchedules[i]['interval'] ?? 'None')
+                      : 'None';
+                  final String newInt = i < updatedSchedules.length
+                      ? (updatedSchedules[i]['interval'] ?? 'None')
+                      : 'None';
                   if (newInt != origInt) {
-                    _publishMqttCommand('SCH_INT$idx:$newInt', topic: _getDeviceTopic('schedule'), allowOffline: true);
+                    _publishMqttCommand('SCH_INT$idx:$newInt',
+                        topic: _getDeviceTopic('schedule'), allowOffline: true);
                   }
                 }
               }
@@ -3233,21 +3332,24 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               // 3. Publish lunch schedule (only send if changed!)
               final String origLunchOn = normalize(originalLunchOn);
               final String origLunchOff = normalize(originalLunchOff);
-              
+
               final String newLunchOn = normalize(updatedLunch['on']);
               final String newLunchOff = normalize(updatedLunch['off']);
 
               if (newLunchOn == 'DISABLED' && newLunchOff == 'DISABLED') {
                 // If it is now fully disabled and was previously active, send clear
                 if (origLunchOn != 'DISABLED' || origLunchOff != 'DISABLED') {
-                  _publishMqttCommand('SCH_CLEAR_LUNCH', topic: _getDeviceTopic('schedule'), allowOffline: true);
+                  _publishMqttCommand('SCH_CLEAR_LUNCH',
+                      topic: _getDeviceTopic('schedule'), allowOffline: true);
                 }
               } else {
                 if (newLunchOn != origLunchOn) {
-                  _publishMqttCommand('LUNCH_ON:$newLunchOn', topic: _getDeviceTopic('schedule'), allowOffline: true);
+                  _publishMqttCommand('LUNCH_ON:$newLunchOn',
+                      topic: _getDeviceTopic('schedule'), allowOffline: true);
                 }
                 if (newLunchOff != origLunchOff) {
-                  _publishMqttCommand('LUNCH_OFF:$newLunchOff', topic: _getDeviceTopic('schedule'), allowOffline: true);
+                  _publishMqttCommand('LUNCH_OFF:$newLunchOff',
+                      topic: _getDeviceTopic('schedule'), allowOffline: true);
                 }
               }
             }
@@ -3257,7 +3359,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               SnackBar(
                 content: Row(
                   children: [
-                    const Icon(Icons.check_circle_rounded, color: Color(0xFF6CC042), size: 18),
+                    const Icon(Icons.check_circle_rounded,
+                        color: Color(0xFF6CC042), size: 18),
                     const SizedBox(width: 10),
                     Text(
                       'Schedule Set Successfully',
@@ -3272,10 +3375,13 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                 backgroundColor: const Color(0xFF131122),
                 behavior: SnackBarBehavior.floating,
                 margin: const EdgeInsets.all(16),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: const Color(0xFF6CC042).withOpacity(0.3), width: 1.2),
+                  side: BorderSide(
+                      color: const Color(0xFF6CC042).withOpacity(0.3),
+                      width: 1.2),
                 ),
                 elevation: 6,
                 duration: const Duration(seconds: 2),
@@ -3286,8 +3392,6 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       ),
     );
   }
-
-
 
   Future<void> _publishMqttSchedule(
       String type, int index, String? time) async {
@@ -3315,9 +3419,18 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           if (index >= 1 && index <= _dynamicSchedules.length) {
             _dynamicSchedules[index - 1]['on'] = '--:--';
             _dynamicSchedules[index - 1]['off'] = '--:--';
-            if (index == 1) { _scheduleOn1 = '--:--'; _scheduleOff1 = '--:--'; }
-            if (index == 2) { _scheduleOn2 = '--:--'; _scheduleOff2 = '--:--'; }
-            if (index == 3) { _scheduleOn3 = '--:--'; _scheduleOff3 = '--:--'; }
+            if (index == 1) {
+              _scheduleOn1 = '--:--';
+              _scheduleOff1 = '--:--';
+            }
+            if (index == 2) {
+              _scheduleOn2 = '--:--';
+              _scheduleOff2 = '--:--';
+            }
+            if (index == 3) {
+              _scheduleOn3 = '--:--';
+              _scheduleOff3 = '--:--';
+            }
           }
           if (index == 99) {
             _lunchOn = '--:--';
@@ -3347,7 +3460,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     } else if (type == 'SCH_CLEAR') {
       payloadStr = index != 99 ? 'SCH_CLEAR$index' : 'SCH_CLEAR_LUNCH';
     } else {
-      payloadStr = type.startsWith('LUNCH') ? '$type:$time' : '$type$index:$time';
+      payloadStr =
+          type.startsWith('LUNCH') ? '$type:$time' : '$type$index:$time';
     }
 
     // Publish to daily schedule topic using unified topic generator
@@ -4225,7 +4339,7 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
               isDark: isDark,
               onToggle: (val) => setState(() => _isScheduleEnabled = val),
               onStartTimeTap: () {}, // Disabled as per user request
-              onEndTimeTap: () {},   // Disabled as per user request
+              onEndTimeTap: () {}, // Disabled as per user request
             ),
             const SizedBox(height: 15),
 
@@ -4239,7 +4353,7 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
               isDark: isDark,
               onToggle: (val) => setState(() => _isLunchEnabled = val),
               onStartTimeTap: () {}, // Disabled as per user request
-              onEndTimeTap: () {},   // Disabled as per user request
+              onEndTimeTap: () {}, // Disabled as per user request
             ),
             const SizedBox(height: 25),
 
@@ -4504,9 +4618,6 @@ class _DeviceControlPageState extends State<_DeviceControlPage> {
       return '--:--';
     }
   }
-
-
-
 }
 
 class _CustomTimePickerDialog extends StatefulWidget {
@@ -4854,123 +4965,135 @@ class _InteractiveThermostatGaugeState
         ),
         SizedBox(width: gap),
         Container(
-            width: gaugeSize,
-            height: gaugeSize,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              boxShadow: [
-                if (widget.isDark && widget.isOnline)
-                  BoxShadow(
-                    color: activeColor.withOpacity(0.15),
-                    blurRadius: 16,
-                    spreadRadius: 4,
-                  ),
-              ],
+          width: gaugeSize,
+          height: gaugeSize,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [
+              if (widget.isDark && widget.isOnline)
+                BoxShadow(
+                  color: activeColor.withOpacity(0.15),
+                  blurRadius: 16,
+                  spreadRadius: 4,
+                ),
+            ],
+          ),
+          child: CustomPaint(
+            size: Size(gaugeSize, gaugeSize),
+            painter: _InteractiveThermostatPainter(
+              setTemp: widget.setTemp,
+              actualTemp: widget.actualTemp,
+              isDark: widget.isDark,
+              isOnline: widget.isOnline,
+              colorScheme: widget.colorScheme,
             ),
-            child: CustomPaint(
-              size: Size(gaugeSize, gaugeSize),
-              painter: _InteractiveThermostatPainter(
-                setTemp: widget.setTemp,
-                actualTemp: widget.actualTemp,
-                isDark: widget.isDark,
-                isOnline: widget.isOnline,
-                colorScheme: widget.colorScheme,
-              ),
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      widget.isAnalyzing
-                          ? 'CHECKING'
-                          : (widget.isOnline ? 'ACTUAL' : 'OFFLINE'),
-                      style: GoogleFonts.poppins(
-                        color: (widget.isAnalyzing
-                                ? Colors.amber
-                                : (widget.isOnline
-                                    ? (widget.isDark ? Colors.white : widget.colorScheme.primary)
-                                    : Colors.redAccent))
-                            .withOpacity(0.4),
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 2,
-                      ),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    widget.isAnalyzing
+                        ? 'CHECKING'
+                        : (widget.isOnline ? 'ACTUAL' : 'OFFLINE'),
+                    style: GoogleFonts.poppins(
+                      color: (widget.isAnalyzing
+                              ? Colors.amber
+                              : (widget.isOnline
+                                  ? (widget.isDark
+                                      ? Colors.white
+                                      : widget.colorScheme.primary)
+                                  : Colors.redAccent))
+                          .withOpacity(0.4),
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2,
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      widget.isOnline ? '${widget.actualTemp.toStringAsFixed(1)}\u00b0C' : '0.0\u00b0C',
-                      style: GoogleFonts.poppins(
-                        color: widget.isOnline
-                            ? (widget.isDark ? Colors.white : const Color(0xFF1B172E))
-                            : (widget.isDark ? Colors.white30 : Colors.black26),
-                        fontSize: fontSize,
-                        fontWeight: FontWeight.w900,
-                      ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    widget.isOnline
+                        ? '${widget.actualTemp.toStringAsFixed(1)}\u00b0C'
+                        : '0.0\u00b0C',
+                    style: GoogleFonts.poppins(
+                      color: widget.isOnline
+                          ? (widget.isDark
+                              ? Colors.white
+                              : const Color(0xFF1B172E))
+                          : (widget.isDark ? Colors.white30 : Colors.black26),
+                      fontSize: fontSize,
+                      fontWeight: FontWeight.w900,
                     ),
-                    const SizedBox(height: 14),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
+                  ),
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: (widget.isOnline ? activeColor : Colors.grey)
+                          .withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
                         color: (widget.isOnline ? activeColor : Colors.grey)
-                            .withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: (widget.isOnline ? activeColor : Colors.grey)
-                              .withOpacity(0.3),
-                        ),
+                            .withOpacity(0.3),
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'SET TEMP',
-                            style: GoogleFonts.poppins(
-                              color: widget.isOnline ? activeColor : Colors.grey,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1.0,
-                            ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'SET TEMP',
+                          style: GoogleFonts.poppins(
+                            color: widget.isOnline ? activeColor : Colors.grey,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.0,
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            widget.isOnline ? '${widget.setTemp.toInt()}\u00b0C' : '0\u00b0C',
-                            style: GoogleFonts.poppins(
-                              color: widget.isOnline
-                                  ? (widget.isDark ? Colors.white : const Color(0xFF1B172E))
-                                  : (widget.isDark ? Colors.white30 : Colors.black26),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w800,
-                            ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          widget.isOnline
+                              ? '${widget.setTemp.toInt()}\u00b0C'
+                              : '0\u00b0C',
+                          style: GoogleFonts.poppins(
+                            color: widget.isOnline
+                                ? (widget.isDark
+                                    ? Colors.white
+                                    : const Color(0xFF1B172E))
+                                : (widget.isDark
+                                    ? Colors.white30
+                                    : Colors.black26),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
                           ),
-                          if (widget.onClearTemp != null && widget.isOnline) ...[
-                            const SizedBox(width: 6),
-                            GestureDetector(
-                              onTap: widget.onClearTemp,
-                              child: Container(
-                                padding: const EdgeInsets.all(2),
-                                decoration: BoxDecoration(
-                                  color: activeColor.withOpacity(0.2),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(
-                                  Icons.close_rounded,
-                                  color: activeColor,
-                                  size: 10,
-                                ),
+                        ),
+                        if (widget.onClearTemp != null && widget.isOnline) ...[
+                          const SizedBox(width: 6),
+                          GestureDetector(
+                            onTap: widget.onClearTemp,
+                            child: Container(
+                              padding: const EdgeInsets.all(2),
+                              decoration: BoxDecoration(
+                                color: activeColor.withOpacity(0.2),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.close_rounded,
+                                color: activeColor,
+                                size: 10,
                               ),
                             ),
-                          ],
+                          ),
                         ],
-                      ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
+        ),
         SizedBox(width: gap),
         // Plus Button
         _buildSideControl(
@@ -5147,9 +5270,7 @@ class _InteractiveThermostatPainter extends CustomPainter {
       handlePos,
       12, // Handle dot size
       Paint()
-        ..color = isOnline
-            ? Colors.white.withOpacity(0.3)
-            : Colors.transparent
+        ..color = isOnline ? Colors.white.withOpacity(0.3) : Colors.transparent
         ..style = PaintingStyle.fill,
     );
     canvas.drawCircle(
@@ -5158,7 +5279,9 @@ class _InteractiveThermostatPainter extends CustomPainter {
       Paint()
         ..color = isOnline
             ? Colors.white
-            : (isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.1)),
+            : (isDark
+                ? Colors.white.withOpacity(0.1)
+                : Colors.black.withOpacity(0.1)),
     );
     canvas.drawCircle(handlePos, 6, Paint()..color = activeColor);
 
@@ -5237,7 +5360,8 @@ class ScheduleManagerPage extends StatefulWidget {
   final bool isDark;
   final List<Map<String, String>> schedules;
   final Map<String, String> lunch;
-  final Function(List<Map<String, String>> updatedSchedules, Map<String, String> updatedLunch, bool hasClearedAll) onSave;
+  final Function(List<Map<String, String>> updatedSchedules,
+      Map<String, String> updatedLunch, bool hasClearedAll) onSave;
 
   const ScheduleManagerPage({
     super.key,
@@ -5255,14 +5379,18 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
   late List<Map<String, String>> _localSchedules;
   late Map<String, String> _localLunch;
   int _activeTab = 0; // 0: Daily, 1: Lunch
-  bool _isPickerOpen = false;
   bool _hasClearedAll = false;
 
   @override
   void initState() {
     super.initState();
-    _localSchedules =
-        widget.schedules.map((s) => Map<String, String>.from(s)).toList();
+    _localSchedules = widget.schedules
+        .take(5)
+        .map((s) => Map<String, String>.from(s))
+        .toList();
+    while (_localSchedules.length < 5) {
+      _localSchedules.add({'on': '--:--', 'off': '--:--', 'interval': 'None'});
+    }
     _localLunch = Map<String, String>.from(widget.lunch);
   }
 
@@ -5284,7 +5412,9 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
     setState(() {
       if (type == 'SCH_ON' && index >= 1 && index <= _localSchedules.length) {
         _localSchedules[index - 1]['on'] = time;
-      } else if (type == 'SCH_OFF' && index >= 1 && index <= _localSchedules.length) {
+      } else if (type == 'SCH_OFF' &&
+          index >= 1 &&
+          index <= _localSchedules.length) {
         _localSchedules[index - 1]['off'] = time;
       } else if (type == 'LUNCH_ON') {
         _localLunch['on'] = time;
@@ -5308,6 +5438,7 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
       for (var s in _localSchedules) {
         s['on'] = '--:--';
         s['off'] = '--:--';
+        s['interval'] = 'None';
       }
       _localLunch['on'] = '--:--';
       _localLunch['off'] = '--:--';
@@ -5320,7 +5451,8 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
       builder: (BuildContext context) {
         return Dialog(
           backgroundColor: const Color(0xFF131122),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -5356,13 +5488,17 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
                         onPressed: () => Navigator.pop(context),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white70,
-                          side: BorderSide(color: Colors.white.withOpacity(0.06), width: 1.2),
+                          side: BorderSide(
+                              color: Colors.white.withOpacity(0.06),
+                              width: 1.2),
                           padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
                         ),
                         child: Text(
                           "Cancel",
-                          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 13),
+                          style: GoogleFonts.outfit(
+                              fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                       ),
                     ),
@@ -5374,14 +5510,35 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
                           Navigator.pop(context);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text(
-                                "All schedules cleared! Tap SAVE to apply.",
-                                style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold),
+                              content: Row(
+                                children: [
+                                  const Icon(Icons.check_circle_rounded,
+                                      color: Color(0xFF6CC042), size: 18),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      "All schedules cleared! Tap SAVE to apply.",
+                                      style: GoogleFonts.outfit(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 12),
+                                    ),
+                                  ),
+                                ],
                               ),
-                              backgroundColor: const Color(0xFF6CC042),
+                              backgroundColor: const Color(0xFF131122),
                               behavior: SnackBarBehavior.floating,
+                              margin: const EdgeInsets.all(16),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                side: BorderSide(
+                                    color: const Color(0xFF6CC042)
+                                        .withOpacity(0.3),
+                                    width: 1.2),
+                              ),
                               duration: const Duration(seconds: 2),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
                           );
                         },
@@ -5390,11 +5547,13 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           elevation: 0,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
                         ),
                         child: Text(
                           "Yes",
-                          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 13),
+                          style: GoogleFonts.outfit(
+                              fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                       ),
                     ),
@@ -5478,11 +5637,17 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
       }
       List<List<int>> getSubIntervals(int start, int end) {
         if (start < end) {
-          return [[start, end]];
+          return [
+            [start, end]
+          ];
         } else {
-          return [[start, 1440], [0, end]];
+          return [
+            [start, 1440],
+            [0, end]
+          ];
         }
       }
+
       final list1 = getSubIntervals(s1, e1);
       final list2 = getSubIntervals(s2, e2);
       for (final i1 in list1) {
@@ -5498,32 +5663,35 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
     for (int i = 0; i < _localSchedules.length; i++) {
       final onStr = _localSchedules[i]['on'];
       final offStr = _localSchedules[i]['off'];
-      
+
       final start = parseTimeToMinutes(onStr);
       final end = parseTimeToMinutes(offStr);
-      
+
       if (start != null || end != null) {
         if (start == null || end == null) {
-          _showValidationError('Schedule ${i + 1} must have both start and end times set, or be completely cleared.');
+          _showValidationError(
+              'Schedule ${i + 1} must have both start and end times set, or be completely cleared.');
           return false;
         }
-        
+
         if (start == end) {
-          _showValidationError('Schedule ${i + 1} cannot start and end at the exact same time.');
+          _showValidationError(
+              'Schedule ${i + 1} cannot start and end at the exact same time.');
           return false;
         }
-        
+
         // Compare with other daily schedules
         for (int j = i + 1; j < _localSchedules.length; j++) {
           final otherOnStr = _localSchedules[j]['on'];
           final otherOffStr = _localSchedules[j]['off'];
-          
+
           final startOther = parseTimeToMinutes(otherOnStr);
           final endOther = parseTimeToMinutes(otherOffStr);
-          
+
           if (startOther != null && endOther != null) {
             if (intervalsOverlap(start, end, startOther, endOther)) {
-              _showValidationError('Schedule ${i + 1} overlaps with Schedule ${j + 1}. Please adjust your timings.');
+              _showValidationError(
+                  'Schedule ${i + 1} overlaps with Schedule ${j + 1}. Please adjust your timings.');
               return false;
             }
           }
@@ -5537,20 +5705,7 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0F0C1B), // Premium dark background
-      floatingActionButton: _activeTab == 0
-          ? Container(
-              margin: const EdgeInsets.only(bottom: 100, right: 16),
-              child: FloatingActionButton(
-                onPressed: _addNewSchedule,
-                backgroundColor: const Color(0xFF6CC042),
-                foregroundColor: Colors.white,
-                elevation: 6,
-                shape: const CircleBorder(),
-                child: const Icon(Icons.add_rounded, size: 30),
-              ),
-            )
-          : null,
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      // (floatingActionButton removed as requested - exactly 5 schedules shown)
       body: SafeArea(
         child: Column(
           children: [
@@ -5560,7 +5715,8 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
               child: Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                        color: Colors.white, size: 20),
                     onPressed: () => Navigator.pop(context),
                   ),
                   const SizedBox(width: 8),
@@ -5640,7 +5796,8 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(Icons.calendar_today_rounded, color: Colors.white12, size: 48),
+                              const Icon(Icons.calendar_today_rounded,
+                                  color: Colors.white12, size: 48),
                               const SizedBox(height: 16),
                               Text(
                                 "No daily schedules created",
@@ -5702,7 +5859,9 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
                           onPressed: () => Navigator.pop(context),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.white70,
-                            side: BorderSide(color: Colors.white.withOpacity(0.06), width: 1.2),
+                            side: BorderSide(
+                                color: Colors.white.withOpacity(0.06),
+                                width: 1.2),
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(14)),
@@ -5721,13 +5880,16 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
                         child: ElevatedButton(
                           onPressed: () {
                             if (!_validateSchedules()) return;
-                            
-                            widget.onSave(_localSchedules, _localLunch, _hasClearedAll);
+
+                            widget.onSave(
+                                _localSchedules, _localLunch, _hasClearedAll);
                             Navigator.pop(context);
-                            
+
                             // 500ms safety guard check to force dismiss if still visible
-                            Future.delayed(const Duration(milliseconds: 500), () {
-                              if (context.mounted && Navigator.canPop(context)) {
+                            Future.delayed(const Duration(milliseconds: 500),
+                                () {
+                              if (context.mounted &&
+                                  Navigator.canPop(context)) {
                                 Navigator.pop(context);
                               }
                             });
@@ -5864,65 +6026,9 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
           // End Time Chip
           _timelineItemChip(off, isLunch ? 'LUNCH_OFF' : 'SCH_OFF', index),
 
-          // Interval Dropdown in one line
-          if (!isLunch && isActive) ...[
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              height: 28,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.04),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: Colors.white.withOpacity(0.06),
-                  width: 1,
-                ),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _localSchedules[index - 1]['interval'] ?? 'None',
-                  dropdownColor: const Color(0xFF1E1B30),
-                  icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white38, size: 14),
-                  style: GoogleFonts.outfit(
-                    color: Colors.white70,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  onChanged: (String? newValue) {
-                    if (newValue != null) {
-                      setState(() {
-                        _localSchedules[index - 1]['interval'] = newValue;
-                      });
-                    }
-                  },
-                  items: <String>[
-                    'None',
-                    '10 mins',
-                    '20 mins',
-                    '30 mins',
-                    '50 mins',
-                    '1 hour',
-                    '2 hours',
-                  ].map<DropdownMenuItem<String>>((String value) {
-                    // Show friendly display text inside the dropdown list
-                    String disp = value;
-                    if (value == '10 mins') disp = '10m';
-                    if (value == '20 mins') disp = '20m';
-                    if (value == '30 mins') disp = '30m';
-                    if (value == '50 mins') disp = '50m';
-                    if (value == '1 hour') disp = '1h';
-                    if (value == '2 hours') disp = '2h';
-                    return DropdownMenuItem<String>(
-                      value: value,
-                      child: Text(disp),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ),
-          ],
 
-          if (isActive || !isLunch) ...[
+
+          if (isActive) ...[
             const SizedBox(width: 8),
             Container(
               width: 1.2,
@@ -5950,26 +6056,6 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
                 ),
               ),
             ),
-            if (!isLunch) const SizedBox(width: 6),
-          ],
-
-          if (!isLunch && index == _localSchedules.length) ...[
-            GestureDetector(
-              onTap: () => _deleteSchedule(index - 1),
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEF4444).withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(
-                  Icons.delete_outline_rounded,
-                  color: Color(0xFFEF4444),
-                  size: 12,
-                ),
-              ),
-            ),
           ],
         ],
       ),
@@ -5982,13 +6068,21 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
       color: Colors.transparent,
       child: InkWell(
         onTap: () async {
-          if (_isPickerOpen) return;
-          setState(() => _isPickerOpen = true);
+          TimeOfDay initialTime = TimeOfDay.now();
+          if (time != '--:--' && time.isNotEmpty && time.contains(':')) {
+            try {
+              final parts = time.split(':');
+              initialTime = TimeOfDay(
+                hour: int.parse(parts[0]),
+                minute: int.parse(parts[1]),
+              );
+            } catch (_) {}
+          }
           try {
             final picked = await showTimePicker(
               context: context,
-              initialTime: TimeOfDay.now(),
-              initialEntryMode: TimePickerEntryMode.dial,
+              initialTime: initialTime,
+              initialEntryMode: TimePickerEntryMode.input,
               builder: (context, child) => Theme(
                 data: ThemeData.dark().copyWith(
                   colorScheme: const ColorScheme.dark(
@@ -5998,6 +6092,19 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
                     onSurface: Colors.white,
                   ),
                   dialogBackgroundColor: const Color(0xFF131122),
+                  timePickerTheme: const TimePickerThemeData(
+                    backgroundColor: Color(0xFF131122),
+                    dialBackgroundColor: Color(0xFF1B172E),
+                    dialHandColor: Color(0xFF6CC042),
+                    dialTextColor: Colors.white,
+                    entryModeIconColor: Colors.white,
+                    hourMinuteColor: Color(0xFF1B172E),
+                    hourMinuteTextColor: Colors.white,
+                    dayPeriodColor: Color(0xFF1B172E),
+                    dayPeriodTextColor: Colors.white,
+                    dayPeriodBorderSide: BorderSide.none,
+                    helpTextStyle: TextStyle(color: Colors.white),
+                  ),
                 ),
                 child: child!,
               ),
@@ -6009,8 +6116,6 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
             }
           } catch (e) {
             debugPrint("Error showing time picker: $e");
-          } finally {
-            if (mounted) setState(() => _isPickerOpen = false);
           }
         },
         borderRadius: BorderRadius.circular(12),

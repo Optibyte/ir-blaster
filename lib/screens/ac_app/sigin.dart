@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:ir_blaster_ac/core/constants/colors.dart';
 import 'package:ir_blaster_ac/core/services/auth_service.dart';
-import 'package:ir_blaster_ac/screens/ac_app/home.dart';
 import 'package:ir_blaster_ac/screens/main_navigation_page.dart';
+import 'package:ir_blaster_ac/screens/ac_app/platform_admin_page.dart';
+import 'package:ir_blaster_ac/screens/ac_app/company_sites_page.dart';
+import 'package:ir_blaster_ac/screens/ac_app/company_admin_page.dart';
 
 class SignInPage extends StatefulWidget {
   const SignInPage({super.key});
@@ -39,14 +41,63 @@ class _SignInPageState extends State<SignInPage> {
     final error = await AuthService.login(email, password);
 
     if (!mounted) return;
-    setState(() => _isLoading = false);
 
     if (error == null) {
-      // Login successful — navigate to home
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const MainNavigationPage()),
+      // Login successful — check role and navigate
+      final userData = await AuthService.getUserData();
+      final role = AuthService.roleFromUserData(userData);
+
+      if (!mounted) return;
+
+      // ── AC System Access Check for non-platform-admins ──
+      if (!AuthService.isPlatformAdminRole(role)) {
+        final companyId = AuthService.extractCompanyId(userData);
+        if (companyId != null && companyId.isNotEmpty) {
+          final hasAcAccess = await AuthService.checkAcSystemAccess(companyId);
+          if (!hasAcAccess) {
+            await AuthService.logout();
+            if (!mounted) return;
+            setState(() => _isLoading = false);
+            _showSnackBar(
+              'Use another login, this is an AC monitoring app so use another credential.',
+              isError: true,
+            );
+            return;
+          }
+        }
+      }
+
+      setState(() => _isLoading = false);
+
+      Widget destination;
+      if (AuthService.isPlatformAdminRole(role)) {
+        final companyId = AuthService.extractCompanyId(userData);
+        destination = PlatformAdminPage(companyId: companyId);
+      } else if (AuthService.isCompanyAdminRole(role)) {
+        destination = const CompanyAdminPage();
+      } else {
+        final siteId = userData?['site']?.toString() ?? userData?['siteId']?.toString();
+        if (siteId != null && siteId.isNotEmpty) {
+          destination = const MainNavigationPage();
+        } else {
+          final companyId = AuthService.extractCompanyId(userData);
+          final companyName = AuthService.extractCompanyName(userData) ?? 'Company Dashboard';
+          final bucket = AuthService.extractBucket(userData) ?? '';
+          destination = CompanySitesPage(
+            companyId: companyId ?? '',
+            companyName: companyName,
+            bucket: bucket,
+          );
+        }
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => destination),
+        (route) => false,
       );
     } else {
+      setState(() => _isLoading = false);
       _showSnackBar(error, isError: true);
     }
   }

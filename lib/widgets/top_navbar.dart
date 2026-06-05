@@ -4,6 +4,7 @@ import 'package:ir_blaster_ac/core/constants/colors.dart';
 import 'package:ir_blaster_ac/core/services/auth_service.dart';
 import 'package:ir_blaster_ac/core/theme/theme_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:ir_blaster_ac/screens/ac_app/admin_panel_page.dart';
 
 /// Redesigned Top Navbar with premium Optibyte branding
 class TopNavbar extends StatelessWidget {
@@ -175,6 +176,11 @@ class TopNavbar extends StatelessWidget {
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     final userData = await AuthService.getUserData();
     final email = await AuthService.getEmail();
+    final role = AuthService.roleFromUserData(userData);
+    final isAdmin = AuthService.isPlatformAdminRole(role) ||
+        AuthService.isCompanyAdminRole(role) ||
+        AuthService.isAdminRole(role) ||
+        AuthService.isSiteAdminRole(role);
 
     if (!context.mounted) return;
 
@@ -249,7 +255,23 @@ class TopNavbar extends StatelessWidget {
                     const Divider(height: 1),
                     const SizedBox(height: 16),
 
-                    const SizedBox(height: 8),
+                    if (isAdmin) ...[
+                      _menuItem(
+                        icon: Icons.admin_panel_settings_outlined,
+                        label: 'Admin Panel',
+                        isDark: isDark,
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const AdminPanelPage(),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                    ],
 
                     // Logout Item
                     _menuItem(

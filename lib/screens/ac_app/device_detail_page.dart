@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:google_fonts/google_fonts.dart';
@@ -2639,7 +2640,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             )
           else
             Column(
-              children: List.generate(math.min(5, _dynamicSchedules.length), (index) {
+              children:
+                  List.generate(math.min(5, _dynamicSchedules.length), (index) {
                 final schedule = _dynamicSchedules[index];
                 final String onTime = schedule['on'] ?? '--:--';
                 final String offTime = schedule['off'] ?? '--:--';
@@ -2650,7 +2652,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                     onTime.toUpperCase() != 'DISABLED' &&
                     offTime.toUpperCase() != 'DISABLED';
 
-                final bool isLast = index == math.min(5, _dynamicSchedules.length) - 1;
+                final bool isLast =
+                    index == math.min(5, _dynamicSchedules.length) - 1;
 
                 // Use a single premium, consistent brand color for all active timeline elements
                 const Color themeColor =
@@ -3212,7 +3215,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               _dynamicSchedules.clear();
               _dynamicSchedules.addAll(updatedSchedules);
               while (_dynamicSchedules.length < 6) {
-                _dynamicSchedules.add({'on': '--:--', 'off': '--:--', 'interval': 'None'});
+                _dynamicSchedules
+                    .add({'on': '--:--', 'off': '--:--', 'interval': 'None'});
               }
 
               // Map back to backward-compatible individual variables if needed
@@ -4633,6 +4637,12 @@ class _CustomTimePickerDialogState extends State<_CustomTimePickerDialog> {
   late int _hour;
   late int _minute;
   late String _period;
+  late final TextEditingController _hourController;
+  late final TextEditingController _minuteController;
+  final FocusNode _hourFocus = FocusNode();
+  final FocusNode _minuteFocus = FocusNode();
+  bool _showClock = false;
+  bool _editingHour = true;
 
   @override
   void initState() {
@@ -4642,178 +4652,159 @@ class _CustomTimePickerDialogState extends State<_CustomTimePickerDialog> {
         : widget.initialTime.hourOfPeriod;
     _minute = widget.initialTime.minute;
     _period = widget.initialTime.period == DayPeriod.am ? 'AM' : 'PM';
+    _hourController = TextEditingController(text: _hour.toString());
+    _minuteController = TextEditingController(
+      text: _minute.toString().padLeft(2, '0'),
+    );
+  }
+
+  @override
+  void dispose() {
+    _hourController.dispose();
+    _minuteController.dispose();
+    _hourFocus.dispose();
+    _minuteFocus.dispose();
+    super.dispose();
+  }
+
+  void _setHour(int value) {
+    _hour = value.clamp(1, 12);
+    _hourController.text = _hour.toString();
+  }
+
+  void _setMinute(int value) {
+    _minute = value.clamp(0, 59);
+    _minuteController.text = _minute.toString().padLeft(2, '0');
+  }
+
+  void _handleHourInput(String value) {
+    final parsed = int.tryParse(value);
+    if (parsed == null) return;
+    setState(() {
+      _hour = parsed.clamp(1, 12);
+      _editingHour = true;
+    });
+  }
+
+  void _handleMinuteInput(String value) {
+    final parsed = int.tryParse(value);
+    if (parsed == null) return;
+    setState(() {
+      _minute = parsed.clamp(0, 59);
+      _editingHour = false;
+    });
+  }
+
+  void _normalizeInputs() {
+    _setHour(int.tryParse(_hourController.text) ?? _hour);
+    _setMinute(int.tryParse(_minuteController.text) ?? _minute);
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? const Color(0xFF1B172E) : Colors.white;
-    final textColor = isDark ? Colors.white : Colors.black87;
+    const bgColor = Color(0xFF2A2446);
+    const panelColor = Color(0xFF1B172E);
+    const accentColor = Color(0xFF6CC042);
 
     return Dialog(
       backgroundColor: bgColor,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 32),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
       child: Container(
-        padding: const EdgeInsets.all(24),
+        width: 360,
+        padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Text(
+              'Set Time',
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 22),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _numberColumn(
+                  controller: _hourController,
+                  focusNode: _hourFocus,
+                  label: 'Hour',
+                  maxValue: 12,
+                  onChanged: _handleHourInput,
+                  onFocused: () => setState(() {
+                    _editingHour = true;
+                  }),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 16, left: 8, right: 8),
+                  child: Text(
+                    ':',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 52,
+                      fontWeight: FontWeight.w500,
+                      height: 1,
+                    ),
+                  ),
+                ),
+                _numberColumn(
+                  controller: _minuteController,
+                  focusNode: _minuteFocus,
+                  label: 'Minute',
+                  maxValue: 59,
+                  padOnBlur: true,
+                  onChanged: _handleMinuteInput,
+                  onFocused: () => setState(() {
+                    _editingHour = false;
+                  }),
+                ),
+                const SizedBox(width: 12),
+                _periodToggle(accentColor),
+              ],
+            ),
+            if (_showClock) ...[
+              const SizedBox(height: 28),
+              Center(
+                child: _clockFace(panelColor, accentColor),
+              ),
+            ],
+            SizedBox(height: _showClock ? 22 : 44),
             Row(
               children: [
                 IconButton(
-                  icon: Icon(Icons.menu, color: textColor.withOpacity(0.6)),
-                  onPressed: () {},
-                ),
-                const Spacer(),
-                Text(
-                  'Set Time',
-                  style: GoogleFonts.poppins(
-                    color: textColor,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 44,
+                    minHeight: 44,
+                  ),
+                  onPressed: () => setState(() {
+                    _showClock = !_showClock;
+                    if (_showClock) _editingHour = true;
+                  }),
+                  icon: Icon(
+                    _showClock ? Icons.keyboard : Icons.access_time,
+                    color: Colors.white,
+                    size: 28,
                   ),
                 ),
                 const Spacer(),
-                const SizedBox(width: 40),
-              ],
-            ),
-            const SizedBox(height: 30),
-
-            // Analog Clock (Decorative)
-            Container(
-              width: 180,
-              height: 180,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: textColor.withOpacity(0.1), width: 8),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 10,
-                    spreadRadius: 2,
-                  ),
-                ],
-              ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  // Hour Marks
-                  for (int i = 1; i <= 12; i++)
-                    Transform.rotate(
-                      angle: (i * 30) * math.pi / 180,
-                      child: Align(
-                        alignment: Alignment.topCenter,
-                        child: Container(
-                          width: 2,
-                          height: 8,
-                          margin: const EdgeInsets.only(top: 4),
-                          color: textColor.withOpacity(0.2),
-                        ),
-                      ),
-                    ),
-                  // Hands (Approximate based on selected time)
-                  Transform.rotate(
-                    angle: ((_hour % 12 + _minute / 60) * 30) * math.pi / 180,
-                    child: Container(
-                      width: 4,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        color: textColor,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                      margin: const EdgeInsets.only(bottom: 50),
-                    ),
-                  ),
-                  Transform.rotate(
-                    angle: (_minute * 6) * math.pi / 180,
-                    child: Container(
-                      width: 2,
-                      height: 70,
-                      decoration: BoxDecoration(
-                        color: textColor.withOpacity(0.6),
-                        borderRadius: BorderRadius.circular(1),
-                      ),
-                      margin: const EdgeInsets.only(bottom: 70),
-                    ),
-                  ),
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: const BoxDecoration(
-                      color: Colors.red,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 40),
-
-            // Time Selectors
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _selector(
-                  List.generate(12, (i) => (i + 1).toString().padLeft(2, '0')),
-                  _hour.toString().padLeft(2, '0'),
-                  (val) => setState(() => _hour = int.parse(val!)),
-                  isDark,
-                ),
-                _selector(
-                  List.generate(60, (i) => i.toString().padLeft(2, '0')),
-                  _minute.toString().padLeft(2, '0'),
-                  (val) => setState(() => _minute = int.parse(val!)),
-                  isDark,
-                ),
-                _selector(
-                  ['AM', 'PM'],
-                  _period,
-                  (val) => setState(() => _period = val!),
-                  isDark,
-                ),
-              ],
-            ),
-            const SizedBox(height: 40),
-
-            // Set Time Button
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                onPressed: () {
+                _dialogAction('Cancel', () => Navigator.pop(context)),
+                const SizedBox(width: 28),
+                _dialogAction('OK', () {
+                  _normalizeInputs();
                   int finalHour = _hour % 12;
                   if (_period == 'PM') finalHour += 12;
                   Navigator.pop(
                     context,
                     TimeOfDay(hour: finalHour, minute: _minute),
                   );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(
-                    0xFF2D6A74,
-                  ), // Match screenshot's teal-ish color
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  elevation: 0,
-                ),
-                child: Text(
-                  'Set Time',
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(
-                'Cancel',
-                style: GoogleFonts.poppins(
-                  color: textColor.withOpacity(0.5),
-                  fontSize: 12,
-                ),
-              ),
+                }),
+                const SizedBox(width: 8),
+              ],
             ),
           ],
         ),
@@ -4821,39 +4812,339 @@ class _CustomTimePickerDialogState extends State<_CustomTimePickerDialog> {
     );
   }
 
-  Widget _selector(
-    List<String> items,
-    String value,
-    ValueChanged<String?> onChanged,
-    bool isDark,
-  ) {
+  Widget _numberColumn({
+    required TextEditingController controller,
+    required FocusNode focusNode,
+    required String label,
+    required int maxValue,
+    required ValueChanged<String> onChanged,
+    required VoidCallback onFocused,
+    bool padOnBlur = false,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 84,
+          height: 80,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: const Color(0xFF1B172E),
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: TextField(
+            controller: controller,
+            focusNode: focusNode,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            maxLength: 2,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              _TimeValueInputFormatter(maxValue: maxValue),
+            ],
+            onTap: onFocused,
+            onChanged: onChanged,
+            onEditingComplete: () {
+              if (padOnBlur && controller.text.isNotEmpty) {
+                final value = int.tryParse(controller.text) ?? 0;
+                controller.text =
+                    value.clamp(0, maxValue).toString().padLeft(2, '0');
+              }
+              focusNode.unfocus();
+            },
+            cursorColor: Colors.white,
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontSize: 48,
+              fontWeight: FontWeight.w400,
+              height: 1,
+            ),
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              counterText: '',
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _periodToggle(Color accentColor) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      width: 66,
+      height: 82,
       decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withOpacity(0.05)
-            : Colors.grey.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withOpacity(0.16), width: 1),
       ),
-      child: DropdownButton<String>(
-        value: value,
-        items: items
-            .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-            .toList(),
-        onChanged: onChanged,
-        underline: const SizedBox(),
-        style: GoogleFonts.poppins(
-          color: isDark ? Colors.white : Colors.black87,
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-        ),
-        icon: Icon(
-          Icons.arrow_drop_down,
-          color: isDark ? Colors.white38 : Colors.black38,
-        ),
-        dropdownColor: isDark ? const Color(0xFF2A244D) : Colors.white,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          _periodButton('AM', accentColor),
+          Container(height: 1, color: Colors.white.withOpacity(0.16)),
+          _periodButton('PM', accentColor),
+        ],
       ),
     );
+  }
+
+  Widget _periodButton(String period, Color accentColor) {
+    final isSelected = _period == period;
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _period = period),
+        child: Container(
+          alignment: Alignment.center,
+          color: isSelected ? accentColor : Colors.transparent,
+          child: Text(
+            period,
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontSize: 19,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _clockFace(Color panelColor, Color accentColor) {
+    return RepaintBoundary(
+      child: _ClockPicker(
+        isHourMode: _editingHour,
+        hour: _hour,
+        minute: _minute,
+        panelColor: panelColor,
+        accentColor: accentColor,
+        onModeChanged: (isHourMode) => setState(() {
+          _editingHour = isHourMode;
+        }),
+        onValueChanged: (value) => setState(() {
+          if (_editingHour) {
+            _setHour(value);
+            _editingHour = false;
+            _minuteFocus.requestFocus();
+          } else {
+            _setMinute(value);
+          }
+        }),
+      ),
+    );
+  }
+
+  Widget _dialogAction(String label, VoidCallback onTap) {
+    return TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        foregroundColor: const Color(0xFF6CC042),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.poppins(
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _TimeValueInputFormatter extends TextInputFormatter {
+  final int maxValue;
+
+  const _TimeValueInputFormatter({required this.maxValue});
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.isEmpty) return newValue;
+    final parsed = int.tryParse(newValue.text);
+    if (parsed == null) return oldValue;
+    if (parsed > maxValue) {
+      final clamped = maxValue.toString().padLeft(maxValue == 59 ? 2 : 1, '0');
+      return TextEditingValue(
+        text: clamped,
+        selection: TextSelection.collapsed(offset: clamped.length),
+      );
+    }
+    return newValue;
+  }
+}
+
+class _ClockPicker extends StatelessWidget {
+  final bool isHourMode;
+  final int hour;
+  final int minute;
+  final Color panelColor;
+  final Color accentColor;
+  final ValueChanged<bool> onModeChanged;
+  final ValueChanged<int> onValueChanged;
+
+  const _ClockPicker({
+    required this.isHourMode,
+    required this.hour,
+    required this.minute,
+    required this.panelColor,
+    required this.accentColor,
+    required this.onModeChanged,
+    required this.onValueChanged,
+  });
+
+  void _selectFromOffset(Offset localPosition, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final delta = localPosition - center;
+    if (delta.distance < size.width * 0.16) return;
+    final rawDegrees =
+        (math.atan2(delta.dy, delta.dx) * 180 / math.pi + 90) % 360;
+
+    if (isHourMode) {
+      final value = ((rawDegrees / 30).round() % 12);
+      onValueChanged(value == 0 ? 12 : value);
+    } else {
+      final value = ((rawDegrees / 6).round() % 60);
+      onValueChanged(value);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = math.min(
+          constraints.maxWidth.isFinite ? constraints.maxWidth : 242.0,
+          242.0,
+        );
+        final squareSize = Size(size, size);
+
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (details) => _selectFromOffset(
+            details.localPosition,
+            squareSize,
+          ),
+          onPanStart: (details) => _selectFromOffset(
+            details.localPosition,
+            squareSize,
+          ),
+          onPanUpdate: (details) => _selectFromOffset(
+            details.localPosition,
+            squareSize,
+          ),
+          onLongPress: () => onModeChanged(!isHourMode),
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: CustomPaint(
+              painter: _ClockPainter(
+                isHourMode: isHourMode,
+                hour: hour,
+                minute: minute,
+                panelColor: panelColor,
+                accentColor: accentColor,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ClockPainter extends CustomPainter {
+  final bool isHourMode;
+  final int hour;
+  final int minute;
+  final Color panelColor;
+  final Color accentColor;
+
+  const _ClockPainter({
+    required this.isHourMode,
+    required this.hour,
+    required this.minute,
+    required this.panelColor,
+    required this.accentColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.shortestSide / 2;
+    final labelRadius = radius * 0.78;
+    final selectedValue = isHourMode ? hour : minute;
+    final selectedStep = isHourMode ? hour % 12 : minute / 5;
+    final selectedAngle = selectedStep * math.pi / 6 - math.pi / 2;
+    final selectedCenter = Offset(
+      center.dx + labelRadius * math.cos(selectedAngle),
+      center.dy + labelRadius * math.sin(selectedAngle),
+    );
+
+    final bgPaint = Paint()..color = panelColor;
+    canvas.drawCircle(center, radius, bgPaint);
+
+    final handPaint = Paint()
+      ..color = accentColor
+      ..strokeWidth = 2.4
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(center, selectedCenter, handPaint);
+    canvas.drawCircle(center, 5, Paint()..color = accentColor);
+    canvas.drawCircle(selectedCenter, 27, Paint()..color = accentColor);
+
+    final values = isHourMode
+        ? List.generate(12, (index) => index + 1)
+        : List.generate(12, (index) => index * 5);
+
+    for (final value in values) {
+      final step = isHourMode ? value % 12 : value / 5;
+      final angle = step * math.pi / 6 - math.pi / 2;
+      final offset = Offset(
+        center.dx + labelRadius * math.cos(angle),
+        center.dy + labelRadius * math.sin(angle),
+      );
+      final isSelected = value == selectedValue;
+      final label =
+          isHourMode ? value.toString() : value.toString().padLeft(2, '0');
+      final painter = TextPainter(
+        text: TextSpan(
+          text: label,
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontSize: isSelected ? 18 : 16,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+        textAlign: TextAlign.center,
+        textDirection: TextDirection.ltr,
+      )..layout();
+
+      painter.paint(
+        canvas,
+        offset - Offset(painter.width / 2, painter.height / 2),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ClockPainter oldDelegate) {
+    return oldDelegate.isHourMode != isHourMode ||
+        oldDelegate.hour != hour ||
+        oldDelegate.minute != minute ||
+        oldDelegate.panelColor != panelColor ||
+        oldDelegate.accentColor != accentColor;
   }
 }
 
@@ -6026,8 +6317,6 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
           // End Time Chip
           _timelineItemChip(off, isLunch ? 'LUNCH_OFF' : 'SCH_OFF', index),
 
-
-
           if (isActive) ...[
             const SizedBox(width: 8),
             Container(
@@ -6079,35 +6368,9 @@ class _ScheduleManagerPageState extends State<ScheduleManagerPage> {
             } catch (_) {}
           }
           try {
-            final picked = await showTimePicker(
+            final picked = await showDialog<TimeOfDay>(
               context: context,
-              initialTime: initialTime,
-              initialEntryMode: TimePickerEntryMode.input,
-              builder: (context, child) => Theme(
-                data: ThemeData.dark().copyWith(
-                  colorScheme: const ColorScheme.dark(
-                    primary: Color(0xFF6CC042),
-                    onPrimary: Colors.white,
-                    surface: Color(0xFF131122),
-                    onSurface: Colors.white,
-                  ),
-                  dialogBackgroundColor: const Color(0xFF131122),
-                  timePickerTheme: const TimePickerThemeData(
-                    backgroundColor: Color(0xFF131122),
-                    dialBackgroundColor: Color(0xFF1B172E),
-                    dialHandColor: Color(0xFF6CC042),
-                    dialTextColor: Colors.white,
-                    entryModeIconColor: Colors.white,
-                    hourMinuteColor: Color(0xFF1B172E),
-                    hourMinuteTextColor: Colors.white,
-                    dayPeriodColor: Color(0xFF1B172E),
-                    dayPeriodTextColor: Colors.white,
-                    dayPeriodBorderSide: BorderSide.none,
-                    helpTextStyle: TextStyle(color: Colors.white),
-                  ),
-                ),
-                child: child!,
-              ),
+              builder: (_) => _CustomTimePickerDialog(initialTime: initialTime),
             );
             if (picked != null) {
               final formatted =

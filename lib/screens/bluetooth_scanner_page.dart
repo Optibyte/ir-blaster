@@ -21,12 +21,8 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
   bool _needsUpdate = false;
 
   static const Color _themeGreen = Color.fromARGB(255, 123, 159, 71);
-  Color get _background => Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFF1A1A2E)
-      : Colors.white;
-  Color get _cardBackground => Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFF2D2D44)
-      : const Color(0xFFF3F7FA);
+  Color get _background => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardBackground => Theme.of(context).cardColor;
 
   @override
   void initState() {

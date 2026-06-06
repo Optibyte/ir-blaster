@@ -148,7 +148,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
 
   Widget _buildHomeContent() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardColor = isDark ? const Color(0xFF2D2D44) : const Color(0xFFF3F7FA);
+    final cardColor = Theme.of(context).cardColor;
     final textColor = isDark ? Colors.white : const Color(0xFF1B172E);
     final textSecondaryColor = isDark ? Colors.white70 : const Color(0xFF5A6E85);
     final iconColor = isDark ? Colors.white70 : const Color(0xFF1B172E);
@@ -344,7 +344,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
 
   Widget _buildProfileContent() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardColor = isDark ? const Color(0xFF2D2D44) : const Color(0xFFF3F7FA);
+    final cardColor = Theme.of(context).cardColor;
     final textColor = isDark ? Colors.white : const Color(0xFF1B172E);
     final textSecondaryColor = isDark ? Colors.white70 : const Color(0xFF5A6E85);
     final iconColor = isDark ? Colors.white70 : const Color(0xFF1B172E);
@@ -460,7 +460,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? const Color(0xFF1A1A2E) : Colors.white;
+    final bgColor = Theme.of(context).scaffoldBackgroundColor;
     final textColor = isDark ? Colors.white : const Color(0xFF1B172E);
 
     return Scaffold(

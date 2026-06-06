@@ -1324,26 +1324,7 @@ class _CompanyAdminPageState extends State<CompanyAdminPage>
                                                       fontWeight:
                                                           FontWeight.bold,
                                                       fontSize: 16)),
-                                              if (site.shortId.isNotEmpty)
-                                                Container(
-                                                  margin: const EdgeInsets.only(top: 6),
-                                                  padding: const EdgeInsets.symmetric(
-                                                      horizontal: 8, vertical: 2),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.redAccent.withValues(alpha: 0.15),
-                                                    borderRadius: BorderRadius.circular(6),
-                                                    border: Border.all(
-                                                        color: Colors.redAccent.withValues(alpha: 0.4),
-                                                        width: 1),
-                                                  ),
-                                                  child: Text(
-                                                    'ID: ${site.shortId}',
-                                                    style: GoogleFonts.poppins(
-                                                        color: Colors.redAccent,
-                                                        fontSize: 10,
-                                                        fontWeight: FontWeight.w600),
-                                                  ),
-                                                ),
+                                            
                                             ],
                                           ),
                                         ),
@@ -1916,12 +1897,12 @@ class _CompanyAdminPageState extends State<CompanyAdminPage>
 
       final validServices = [
         'EMS',
-        'COMPRESSOR',
-        'NEW COMPRESSOR',
+        // 'COMPRESSOR',
+        // 'NEW COMPRESSOR',
         'AC',
-        'CHILLER',
-        'WATER',
-        'WELD'
+        // 'CHILLER',
+        // 'WATER',
+        // 'WELD'
       ];
       final eService = emp.serviceType?.isNotEmpty == true
           ? emp.serviceType!
@@ -2182,14 +2163,14 @@ class _CompanyAdminPageState extends State<CompanyAdminPage>
                   ),
                   items: const [
                     DropdownMenuItem(value: 'EMS', child: Text('EMS')),
-                    DropdownMenuItem(
-                        value: 'COMPRESSOR', child: Text('COMPRESSOR')),
-                    DropdownMenuItem(
-                        value: 'NEW COMPRESSOR', child: Text('NEW COMPRESSOR')),
+                    // DropdownMenuItem(
+                    //     value: 'COMPRESSOR', child: Text('COMPRESSOR')),
+                    // DropdownMenuItem(
+                    //     value: 'NEW COMPRESSOR', child: Text('NEW COMPRESSOR')),
                     DropdownMenuItem(value: 'AC', child: Text('AC')),
-                    DropdownMenuItem(value: 'CHILLER', child: Text('CHILLER')),
-                    DropdownMenuItem(value: 'WATER', child: Text('WATER')),
-                    DropdownMenuItem(value: 'WELD', child: Text('WELD')),
+                    // DropdownMenuItem(value: 'CHILLER', child: Text('CHILLER')),
+                    // DropdownMenuItem(value: 'WATER', child: Text('WATER')),
+                    // DropdownMenuItem(value: 'WELD', child: Text('WELD')),
                   ],
                   onChanged: (val) =>
                       setDialogState(() => _selectedServiceType = val),

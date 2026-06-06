@@ -33,8 +33,8 @@ class _CompanySitesPageState extends State<CompanySitesPage> {
 
   bool _isDarkTheme = true;
 
-  Color get _bgColor => _isDarkTheme ? AppColors.background : Colors.white;
-  Color get _cardColor => _isDarkTheme ? AppColors.secondaryBackground : const Color(0xFFF3F7FA);
+  Color get _bgColor => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardColor => _isDarkTheme ? const Color(0xFF2A244D) : const Color.fromARGB(186, 207, 236, 170);
   Color get _textColor => _isDarkTheme ? Colors.white : const Color(0xFF1B172E);
   Color get _textSecondaryColor => _isDarkTheme ? Colors.white70 : const Color(0xFF5A6E85);
   Color get _appBarIconColor => _isDarkTheme ? Colors.white : const Color(0xFF1B172E);
@@ -196,7 +196,7 @@ class _CompanySitesPageState extends State<CompanySitesPage> {
     return Scaffold(
       backgroundColor: _bgColor,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: _isDarkTheme ? const Color(0xFF2A244D) : const Color.fromARGB(205, 95, 165, 20),
         elevation: 0,
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios_new_rounded, color: _appBarIconColor),

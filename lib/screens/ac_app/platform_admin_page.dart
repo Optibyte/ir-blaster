@@ -28,13 +28,16 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
 
   bool _isDarkTheme = true;
 
-  Color get _bgColor => _isDarkTheme ? AppColors.background : Colors.white;
-  Color get _cardColor => _isDarkTheme ? AppColors.secondaryBackground : const Color(0xFFF3F7FA);
-  Color get _textColor => _isDarkTheme ? Colors.white : const Color(0xFF1B172E);
-  Color get _textSecondaryColor => _isDarkTheme ? Colors.white70 : const Color(0xFF5A6E85);
+  Color get _bgColor => Theme.of(context).scaffoldBackgroundColor;
+  // Color get _cardColor => Theme.of(context).cardColor;
+  // Color get _cardColor => Theme.of(context).cardColor;
+  Color get _cardColor => _isDarkTheme ? const Color(0xFF2A244D) : const Color.fromARGB(255, 249, 249, 248);
+  Color get _textColor => _isDarkTheme ? Colors.white : Colors.white ;
+  Color get _textbody => _isDarkTheme ? Colors.white : Color.fromARGB(223, 74, 137, 8) ;
+  Color get _textSecondaryColor => _isDarkTheme ? Colors.white70 : Colors.white70;
   Color get _textMutedColor => _isDarkTheme ? Colors.white38 : const Color(0xFF8A9EAD);
   Color get _appBarIconColor => _isDarkTheme ? Colors.white : const Color(0xFF1B172E);
-  Color get _dialogBgColor => _isDarkTheme ? AppColors.secondaryBackground : Colors.white;
+  Color get _dialogBgColor => Theme.of(context).cardColor;
   Color get _dividerColor => _isDarkTheme ? Colors.white12 : Colors.black12;
   Color get _shadowColor => _isDarkTheme ? Colors.black26 : Colors.black.withValues(alpha: 0.05);
 
@@ -48,7 +51,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
           title: Text(
             'Theme Preferences',
             style: GoogleFonts.poppins(
-              color: _textColor,
+              color: _textbody,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -58,11 +61,11 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
               RadioListTile<bool>(
                 title: Text(
                   'Dark Theme',
-                  style: GoogleFonts.poppins(color: _textColor),
+                  style: GoogleFonts.poppins(color: _textbody),
                 ),
                 subtitle: Text(
                   'Sleek dark purple & green',
-                  style: GoogleFonts.poppins(color: _textSecondaryColor, fontSize: 11),
+                  style: GoogleFonts.poppins(color: _textbody, fontSize: 11),
                 ),
                 value: true,
                 groupValue: _isDarkTheme,
@@ -79,11 +82,11 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
               RadioListTile<bool>(
                 title: Text(
                   'Light Theme',
-                  style: GoogleFonts.poppins(color: _textColor),
+                  style: GoogleFonts.poppins(color: _textbody),
                 ),
                 subtitle: Text(
                   'Clean white & green / dark blue',
-                  style: GoogleFonts.poppins(color: _textSecondaryColor, fontSize: 11),
+                  style: GoogleFonts.poppins(color: _textbody, fontSize: 11),
                 ),
                 value: false,
                 groupValue: _isDarkTheme,
@@ -1317,14 +1320,16 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
     return Scaffold(
       backgroundColor: _bgColor,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        
+        // backgroundColor: Colors.transparent,
+         backgroundColor: _isDarkTheme ? const Color(0xFF2A244D) : const Color.fromARGB(223, 74, 137, 8),
         elevation: 0,
         leading: Container(
           margin: const EdgeInsets.only(left: 16),
           alignment: Alignment.center,
-          child: const Icon(
+          child: Icon(
             Icons.gpp_good_outlined,
-            color: Color(0xFF6CC042),
+            color: _isDarkTheme ? Color(0xFF6CC042) : Colors.white,
             size: 28,
           ),
         ),
@@ -1361,7 +1366,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                     const SizedBox(width: 8),
                     Text(
                       _isDarkTheme ? 'Light Theme' : 'Dark Theme',
-                      style: GoogleFonts.poppins(color: _textColor),
+                      style: GoogleFonts.poppins(color: _textbody),
                     ),
                   ],
                 ),
@@ -1383,7 +1388,14 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
         ],
         bottom: TabBar(
           controller: _tabController,
-          indicatorColor: AppColors.button,
+          indicator: UnderlineTabIndicator(
+  borderSide: BorderSide(
+    color: _isDarkTheme
+        ? const Color(0xFF6CC042)
+        : const Color(0xFF242038),
+    width: 3,
+  ),
+),
           labelColor: _isDarkTheme ? AppColors.button : const Color(0xFF1B172E),
           unselectedLabelColor: _textSecondaryColor,
           labelStyle:
@@ -1536,6 +1548,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                   'No companies on map.', Icons.location_off_rounded)
             else
               ...companies.map((comp) {
+                debugPrint('Companies: $companies');
                 return Container(
                   margin: const EdgeInsets.only(bottom: 10),
                   padding:
@@ -1559,7 +1572,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                       Text(
                         comp.name,
                         style: GoogleFonts.poppins(
-                          color: _textColor,
+                          color: _textbody,
                           fontWeight: FontWeight.w600,
                           fontSize: 14,
                         ),
@@ -1584,7 +1597,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
             Text(
               'Company Selection',
               style: GoogleFonts.poppins(
-                color: _textColor,
+                color: _textbody,
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
               ),
@@ -1593,7 +1606,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
             Text(
               'Select a company to view its dashboard',
               style: GoogleFonts.poppins(
-                color: _textSecondaryColor,
+                color: _textbody,
                 fontSize: 12,
               ),
             ),

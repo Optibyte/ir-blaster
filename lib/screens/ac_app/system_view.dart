@@ -209,7 +209,7 @@ class _SystemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardColor = isDark ? const Color(0xFF1E1A2D) : const Color(0xFFF3F7FA);
+    final cardColor = Theme.of(context).cardColor;
     final borderColor = isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05);
     final textColor = isDark ? Colors.white : const Color(0xFF1B172E);
     final pillBg = isDark ? const Color(0xFF0E0B16) : Colors.white;

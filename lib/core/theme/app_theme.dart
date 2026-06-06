@@ -8,6 +8,9 @@ class AppTheme {
   static const Color darkBlue = Color(0xFF1B172E);
   static const Color accentGreen = Color(0xFF6CC042);
   static const Color secondaryDark = Color(0xFF2A244D);
+  
+  // 👈 CHANGE YOUR PREFERRED LIGHT MODE CARD COLOR HERE
+  static const Color preferredLightCardColor = Color(0xFFF8F9FA);
 
   static ThemeData darkTheme = ThemeData(
     useMaterial3: true,
@@ -41,7 +44,7 @@ class AppTheme {
     brightness: Brightness.light,
     scaffoldBackgroundColor: Colors.white,
     primaryColor: darkBlue,
-    cardColor: const Color(0xFFF8F9FA),
+    cardColor: preferredLightCardColor,
     textTheme: GoogleFonts.poppinsTextTheme(ThemeData.light().textTheme),
     colorScheme: const ColorScheme.light(
       primary: darkBlue,

@@ -124,22 +124,30 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   bool _isMqttConnected = false;
   String _mqttStatus = "MQTT not connected";
 
-  final TextEditingController _mqttHostController = TextEditingController(text: "13.66.130.236");
-  final TextEditingController _mqttPortController = TextEditingController(text: "1883");
-  final TextEditingController _mqttUserController = TextEditingController(text: "testir");
-  final TextEditingController _mqttPassController = TextEditingController(text: "ir@123");
-  final TextEditingController _mqttTopicController = TextEditingController(text: "sustainabyte/testir/control");
+  final TextEditingController _mqttHostController =
+      TextEditingController(text: "13.66.130.236");
+  final TextEditingController _mqttPortController =
+      TextEditingController(text: "1883");
+  final TextEditingController _mqttUserController =
+      TextEditingController(text: "testir");
+  final TextEditingController _mqttPassController =
+      TextEditingController(text: "ir@123");
+  final TextEditingController _mqttTopicController =
+      TextEditingController(text: "sustainabyte/testir/control");
 
   // ===================== Auto control =====================
   bool _autoControlEnabled = false;
-  final TextEditingController _autoOnController = TextEditingController(text: "28");
-  final TextEditingController _autoOffController = TextEditingController(text: "25");
+  final TextEditingController _autoOnController =
+      TextEditingController(text: "28");
+  final TextEditingController _autoOffController =
+      TextEditingController(text: "25");
 
   // ===================== AC Remote dropdowns =====================
 
   // 1) DEFAULT REMOTE dropdown (hardcoded / default send)
   bool _showDefaultRemoteDropdown = true;
-  String _defaultRemoteBrand = "Samsung"; // default remote brand selector (still no brand in title)
+  String _defaultRemoteBrand =
+      "Samsung"; // default remote brand selector (still no brand in title)
 
   // 2) REMOTE CONFIG dropdown (learning + save)
   bool _showRemoteConfigDropdown = true;
@@ -180,13 +188,13 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     _loadSavedState();
     _listenBluetooth();
     _startBluetoothStateMonitor();
-    
+
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted && _connection.isConnected) {
         _sendCommand("GET_TEMP");
         _sendCommand("GET_TIME");
         _sendCommand("GET_WIFI"); // Ask device for actual WiFi status
-        
+
         // Timeout for initial sync
         Future.delayed(const Duration(seconds: 5), () {
           if (mounted && _wifiStatus.contains("Syncing")) {
@@ -231,16 +239,17 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       setState(() {
         final wasConnected = prefs.getBool('wifi_connected') ?? false;
         _wifiIP = prefs.getString('wifi_ip') ?? "";
-        
+
         // We start as 'not connected' until the device confirms status
-        _isWifiConnected = false; 
+        _isWifiConnected = false;
         if (wasConnected) {
           _wifiStatus = "Syncing WiFi status... ⏳";
         } else {
           _wifiStatus = "WiFi not connected";
         }
 
-        _defaultRemoteBrand = prefs.getString('default_remote_brand') ?? "Samsung";
+        _defaultRemoteBrand =
+            prefs.getString('default_remote_brand') ?? "Samsung";
         _configBrand = prefs.getString('config_remote_brand') ?? "LG";
       });
 
@@ -285,7 +294,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('mqtt_host', _mqttHostController.text.trim());
-      await prefs.setInt('mqtt_port', int.tryParse(_mqttPortController.text.trim()) ?? 1883);
+      await prefs.setInt(
+          'mqtt_port', int.tryParse(_mqttPortController.text.trim()) ?? 1883);
       await prefs.setString('mqtt_user', _mqttUserController.text.trim());
       await prefs.setString('mqtt_pass', _mqttPassController.text);
       await prefs.setString('mqtt_topic', _mqttTopicController.text.trim());
@@ -296,8 +306,10 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('auto_enabled', _autoControlEnabled);
-      await prefs.setDouble('auto_on', double.tryParse(_autoOnController.text.trim()) ?? 28.0);
-      await prefs.setDouble('auto_off', double.tryParse(_autoOffController.text.trim()) ?? 25.0);
+      await prefs.setDouble(
+          'auto_on', double.tryParse(_autoOnController.text.trim()) ?? 28.0);
+      await prefs.setDouble(
+          'auto_off', double.tryParse(_autoOffController.text.trim()) ?? 25.0);
     } catch (_) {}
   }
 
@@ -432,7 +444,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       _sendMqttSettingsToDevice(connect: true);
       return;
     }
-    if (line.toLowerCase().contains("wifi_failed") || line.toLowerCase().contains("wifi failed")) {
+    if (line.toLowerCase().contains("wifi_failed") ||
+        line.toLowerCase().contains("wifi failed")) {
       _hideWifiLoadingDialog();
       setState(() {
         _isWifiConnected = false;
@@ -453,9 +466,11 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     if (line.contains("WIFI_STATUS:") || line.contains("WIFI_STATE:")) {
       final status = line.split(":").last.trim();
       final parts = status.split(",");
-      final isConn = parts[0] == "1" || parts[0].toLowerCase() == "true" || parts[0].toLowerCase() == "connected";
+      final isConn = parts[0] == "1" ||
+          parts[0].toLowerCase() == "true" ||
+          parts[0].toLowerCase() == "connected";
       final ip = parts.length > 1 ? parts[1] : "";
-      
+
       if (isConn) _hideWifiLoadingDialog();
       setState(() {
         _isWifiConnected = isConn;
@@ -469,11 +484,10 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     }
 
     // Generic "connected" check if device uses non-standard format or prefixes
-    if (line.toLowerCase().contains("wifi connected") || 
+    if (line.toLowerCase().contains("wifi connected") ||
         line.toLowerCase().contains("connected to wifi") ||
         line.toLowerCase().contains("status_online") ||
         line.toLowerCase().contains("wifi_connected")) {
-      
       _hideWifiLoadingDialog();
       setState(() {
         _isWifiConnected = true;
@@ -481,13 +495,14 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         _wifiStatus = "WiFi Connected ✅";
         _isGreenLedOn = true;
         _showMqttDropdown = true;
-        
+
         // If the line contains an IP (e.g. "WIFI_CONNECTED:192.168.1.5")
         if (line.contains(":")) {
           final parts = line.split(":");
           for (var part in parts) {
             final trimmed = part.trim();
-            if (RegExp(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$').hasMatch(trimmed)) {
+            if (RegExp(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')
+                .hasMatch(trimmed)) {
               _wifiIP = trimmed;
               _wifiStatus = "WiFi Connected: $trimmed";
               break;
@@ -542,7 +557,9 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       return;
     }
     if (line.startsWith("IR_LEARNING_PROGRESS:")) {
-      final p = int.tryParse(line.replaceFirst("IR_LEARNING_PROGRESS:", "").trim()) ?? 0;
+      final p =
+          int.tryParse(line.replaceFirst("IR_LEARNING_PROGRESS:", "").trim()) ??
+              0;
       setState(() {
         _learningProgress = p.clamp(0, 100);
       });
@@ -603,7 +620,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     }
     try {
       _log("TX: $cmd");
-      _connection.output.add(Uint8List.fromList(utf8.encode("$cmd\r\n"))); // Using \r\n for better compatibility
+      _connection.output.add(Uint8List.fromList(
+          utf8.encode("$cmd\r\n"))); // Using \r\n for better compatibility
       await _connection.output.allSent;
     } catch (e) {
       _showSnack("Send failed: $e", _red);
@@ -617,15 +635,16 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       _showSnack("Bluetooth not connected. Please connect first.", _red);
       return;
     }
-    
+
     bool passwordVisible = false;
-    
+
     showDialog(
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           backgroundColor: _cardBackground,
-          title: const Text("WiFi Setup", style: TextStyle(color: Colors.white)),
+          title:
+              const Text("WiFi Setup", style: TextStyle(color: Colors.white)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -636,8 +655,10 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
                   labelText: "SSID",
                   labelStyle: TextStyle(color: Colors.white70),
                   border: OutlineInputBorder(),
-                  enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
-                  focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+                  enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white54)),
+                  focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white)),
                 ),
               ),
               const SizedBox(height: 10),
@@ -649,8 +670,10 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
                   labelText: "Password",
                   labelStyle: const TextStyle(color: Colors.white70),
                   border: const OutlineInputBorder(),
-                  enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
-                  focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+                  enabledBorder: const OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white54)),
+                  focusedBorder: const OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white)),
                   suffixIcon: IconButton(
                     icon: Icon(
                       passwordVisible ? Icons.visibility : Icons.visibility_off,
@@ -667,9 +690,13 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel", style: TextStyle(color: Colors.white70))),
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Cancel",
+                    style: TextStyle(color: Colors.white70))),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: _themeGreen, foregroundColor: Colors.black),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: _themeGreen, foregroundColor: Colors.black),
               onPressed: () {
                 Navigator.pop(context);
                 _connectWifi();
@@ -694,7 +721,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     await LocalCacheService.saveWifiCredentials(ssid, pass);
 
     setState(() {
-      _isWifiConnected = false; 
+      _isWifiConnected = false;
       _wifiStatus = "Connecting to WiFi...";
       _isConnectingWifi = true;
     });
@@ -702,12 +729,12 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     // Send multiple variants to ensure compatibility with different firmware versions
     await _sendCommand("WIFI:$ssid,$pass");
     await Future.delayed(const Duration(milliseconds: 300));
-    await _sendCommand("WIFI_CONNECT"); 
+    await _sendCommand("WIFI_CONNECT");
     await Future.delayed(const Duration(milliseconds: 300));
     await _sendCommand("WIFI_START");
-    
+
     _showWifiLoadingDialog();
-    
+
     // Auto-dismiss loading dialog after 30 seconds if no response from device
     // Extended timeout for slow ESP32 WiFi connections
     Future.delayed(const Duration(seconds: 60), () {
@@ -758,7 +785,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     await _saveAutoPrefs();
 
     if (_autoControlEnabled) {
-      await _sendCommand("AUTO_CFG:${onV.toStringAsFixed(1)},${offV.toStringAsFixed(1)},1");
+      await _sendCommand(
+          "AUTO_CFG:${onV.toStringAsFixed(1)},${offV.toStringAsFixed(1)},1");
       _showSnack("Auto enabled ✅", _green);
     } else {
       await _sendCommand("AUTO_DISABLE");
@@ -882,7 +910,9 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel")),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
@@ -905,9 +935,39 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   }
 
   // ===================== Scheduling =====================
-  Future<void> _pickTime(TextEditingController controller, String cmdPrefix) async {
+  Future<void> _pickTime(
+      TextEditingController controller, String cmdPrefix) async {
     final now = TimeOfDay.now();
-    final picked = await showTimePicker(context: context, initialTime: now);
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: now,
+      initialEntryMode: TimePickerEntryMode.input,
+      builder: (context, child) => Theme(
+        data: ThemeData.dark().copyWith(
+          colorScheme: const ColorScheme.dark(
+            primary: Color(0xFF6CC042),
+            onPrimary: Colors.white,
+            surface: Color(0xFF131122),
+            onSurface: Colors.white,
+          ),
+          dialogBackgroundColor: const Color(0xFF131122),
+          timePickerTheme: const TimePickerThemeData(
+            backgroundColor: Color(0xFF131122),
+            dialBackgroundColor: Color(0xFF1B172E),
+            dialHandColor: Color(0xFF6CC042),
+            dialTextColor: Colors.white,
+            entryModeIconColor: Colors.white,
+            hourMinuteColor: Color(0xFF1B172E),
+            hourMinuteTextColor: Colors.white,
+            dayPeriodColor: Color(0xFF1B172E),
+            dayPeriodTextColor: Colors.white,
+            dayPeriodBorderSide: BorderSide.none,
+            helpTextStyle: TextStyle(color: Colors.white),
+          ),
+        ),
+        child: child!,
+      ),
+    );
     if (picked == null) return;
 
     final hh = picked.hour.toString().padLeft(2, '0');
@@ -919,7 +979,9 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
 
   // ===================== UI =====================
   Widget _buildStatusCard() {
-    final title = _isConnected ? "Connected: ${_device.name ?? 'Device'}" : "Bluetooth not connected";
+    final title = _isConnected
+        ? "Connected: ${_device.name ?? 'Device'}"
+        : "Bluetooth not connected";
     return Card(
       color: _cardBackground,
       elevation: 2,
@@ -929,17 +991,24 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         padding: const EdgeInsets.all(12),
         child: Row(
           children: [
-            Icon(_isConnected ? Icons.bluetooth_connected : Icons.bluetooth_disabled, color: _isConnected ? _blue : _red),
+            Icon(
+                _isConnected
+                    ? Icons.bluetooth_connected
+                    : Icons.bluetooth_disabled,
+                color: _isConnected ? _blue : _red),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.w800, color: Colors.white)),
+                  Text(title,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w800, color: Colors.white)),
                   const SizedBox(height: 4),
                   Text(
                     "Mobile Bluetooth: ${_isBluetoothOn ? 'ON' : 'OFF'}",
-                    style: TextStyle(fontSize: 12, color: _isBluetoothOn ? _green : _red),
+                    style: TextStyle(
+                        fontSize: 12, color: _isBluetoothOn ? _green : _red),
                   ),
                   const Text(
                     "Status: Active",
@@ -952,13 +1021,17 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Row(children: [
-                  Icon(Icons.circle, size: 12, color: _isYellowLedOn ? Colors.yellow : Colors.grey),
+                  Icon(Icons.circle,
+                      size: 12,
+                      color: _isYellowLedOn ? Colors.yellow : Colors.grey),
                   const SizedBox(width: 4),
                   const Text("BT", style: TextStyle(color: Colors.white)),
                 ]),
                 const SizedBox(height: 4),
                 Row(children: [
-                  Icon(Icons.circle, size: 12, color: _isGreenLedOn ? _themeGreen : Colors.grey),
+                  Icon(Icons.circle,
+                      size: 12,
+                      color: _isGreenLedOn ? _themeGreen : Colors.grey),
                   const SizedBox(width: 4),
                   const Text("WiFi", style: TextStyle(color: Colors.white)),
                 ]),
@@ -977,7 +1050,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         child: TextButton.icon(
           onPressed: () => setState(() => _showTerminal = true),
           icon: const Icon(Icons.developer_mode, color: Colors.white70),
-          label: const Text("Show Logs", style: TextStyle(color: Colors.white70)),
+          label:
+              const Text("Show Logs", style: TextStyle(color: Colors.white70)),
         ),
       );
     }
@@ -993,20 +1067,29 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
           children: [
             Row(
               children: [
-                const Expanded(child: Text("Terminal / Logs", style: TextStyle(fontWeight: FontWeight.w900, color: Colors.white))),
-                IconButton(onPressed: () => setState(() => _showTerminal = false), icon: const Icon(Icons.close, color: Colors.white70)),
+                const Expanded(
+                    child: Text("Terminal / Logs",
+                        style: TextStyle(
+                            fontWeight: FontWeight.w900, color: Colors.white))),
+                IconButton(
+                    onPressed: () => setState(() => _showTerminal = false),
+                    icon: const Icon(Icons.close, color: Colors.white70)),
               ],
             ),
             const SizedBox(height: 8),
             Container(
               height: 160,
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(12)),
+              decoration: BoxDecoration(
+                  color: Colors.black, borderRadius: BorderRadius.circular(12)),
               child: SingleChildScrollView(
                 reverse: true,
                 child: Text(
                   _terminalController.text,
-                  style: const TextStyle(fontFamily: 'monospace', color: _themeGreen, fontSize: 11),
+                  style: const TextStyle(
+                      fontFamily: 'monospace',
+                      color: _themeGreen,
+                      fontSize: 11),
                 ),
               ),
             ),
@@ -1020,7 +1103,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   void _log(String msg) {
     final t = DateFormat("HH:mm:ss").format(DateTime.now());
     _terminalController.text += "[$t] $msg\n";
-    
+
     // Throttle UI updates for logs if they come in too fast
     if (!_needsUpdate) {
       _needsUpdate = true;
@@ -1035,7 +1118,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   }
 
   void _showSnack(String msg, Color c) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: c));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg), backgroundColor: c));
   }
 
   void _showWifiLoadingDialog() {
@@ -1083,7 +1167,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
 
   void _showReconnectDialog() {
     if (!mounted) return;
-    
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1117,7 +1201,10 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
             const SizedBox(height: 4),
             Text(
               "Hint: ${_disconnectHint(_lastDisconnectReason)}",
-              style: const TextStyle(fontSize: 12, color: Colors.white54, fontStyle: FontStyle.italic),
+              style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.white54,
+                  fontStyle: FontStyle.italic),
             ),
             const SizedBox(height: 12),
             Container(
@@ -1180,7 +1267,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
 
   Future<void> _attemptReconnect() async {
     _showLoadingDialog("Reconnecting...");
-    
+
     try {
       final connection = await BluetoothConnection.toAddress(_device.address);
       if (connection.isConnected && mounted) {
@@ -1258,11 +1345,14 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     return Scaffold(
       backgroundColor: _background,
       appBar: AppBar(
-        title: const Text("Configuration", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+        title: const Text("Configuration",
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
         backgroundColor: _themeGreen,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
-          IconButton(icon: const Icon(Icons.bluetooth_disabled), onPressed: _disconnectBluetooth),
+          IconButton(
+              icon: const Icon(Icons.bluetooth_disabled),
+              onPressed: _disconnectBluetooth),
         ],
       ),
       body: SingleChildScrollView(
@@ -1270,14 +1360,15 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
           children: [
             RepaintBoundary(child: _buildStatusCard()),
             RepaintBoundary(
-              child: WifiSectionWidget(
+                child: WifiSectionWidget(
               themeGreen: _themeGreen,
               isWifiConnected: _isWifiConnected,
               wifiStatus: _wifiStatus,
               wifiIP: _wifiIP,
               onShowWifiSetup: _showWifiSetupDialog,
               showMqttDropdown: _showMqttDropdown,
-              onToggleMqttDropdown: () => setState(() => _showMqttDropdown = !_showMqttDropdown),
+              onToggleMqttDropdown: () =>
+                  setState(() => _showMqttDropdown = !_showMqttDropdown),
               mqttStatus: _mqttStatus,
               isMqttConnected: _isMqttConnected,
               mqttHostController: _mqttHostController,
@@ -1285,7 +1376,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
               mqttTopicController: _mqttTopicController,
               mqttUserController: _mqttUserController,
               mqttPassController: _mqttPassController,
-              onSendMqttSettings: () => _sendMqttSettingsToDevice(connect: false),
+              onSendMqttSettings: () =>
+                  _sendMqttSettingsToDevice(connect: false),
               onConnectMqtt: () => _sendMqttSettingsToDevice(connect: true),
               autoControlEnabled: _autoControlEnabled,
               onAutoControlChanged: (v) async {
@@ -1298,7 +1390,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
               onApplyAutoConfig: _sendAutoSetpointsToDevice,
             )),
             RepaintBoundary(
-              child: TemperatureWidget(
+                child: TemperatureWidget(
               temperatureText: _temperatureText,
               deviceTimeText: _deviceTimeText,
               onRefreshTemp: () => _sendCommand("GET_TEMP"),
@@ -1314,12 +1406,12 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
               },
             )),
             RepaintBoundary(
-              child: ACControlWidget(
+                child: ACControlWidget(
               themeGreen: _themeGreen,
               brandItems: _brandDropdownItems(),
               showDefaultRemoteDropdown: _showDefaultRemoteDropdown,
-              onToggleDefaultRemoteDropdown: () =>
-                  setState(() => _showDefaultRemoteDropdown = !_showDefaultRemoteDropdown),
+              onToggleDefaultRemoteDropdown: () => setState(() =>
+                  _showDefaultRemoteDropdown = !_showDefaultRemoteDropdown),
               defaultRemoteBrand: _defaultRemoteBrand,
               onDefaultBrandChanged: _setDefaultBrandOnDevice,
               onPowerOn: () => _sendDefaultRemoteKey("POWER_ON"),
@@ -1331,10 +1423,11 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
               onTimeController: _onTimeController,
               offTimeController: _offTimeController,
               onPickOnTime: () => _pickTime(_onTimeController, "SCHEDULE_ON"),
-              onPickOffTime: () => _pickTime(_offTimeController, "SCHEDULE_OFF"),
+              onPickOffTime: () =>
+                  _pickTime(_offTimeController, "SCHEDULE_OFF"),
               showRemoteConfigDropdown: _showRemoteConfigDropdown,
-              onToggleRemoteConfigDropdown: () =>
-                  setState(() => _showRemoteConfigDropdown = !_showRemoteConfigDropdown),
+              onToggleRemoteConfigDropdown: () => setState(
+                  () => _showRemoteConfigDropdown = !_showRemoteConfigDropdown),
               configBrand: _configBrand,
               onConfigBrandChanged: _setConfigBrandOnDevice,
               configMode: _configMode,

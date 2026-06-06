@@ -21,33 +21,116 @@ class AuthService {
     aOptions: AndroidOptions(),
   );
 
+  static Future<void> _persistUserData(Map<String, dynamic>? userData) async {
+    if (userData == null) return;
+
+    await _storage.write(key: _userDataKey, value: jsonEncode(userData));
+    await _storage.write(
+      key: _companyIdKey,
+      value: extractCompanyId(userData) ?? '',
+    );
+    await _storage.write(key: _bucketKey, value: extractBucket(userData) ?? '');
+    await _storage.write(
+      key: _siteIdKey,
+      value:
+          userData['site']?.toString() ?? userData['siteId']?.toString() ?? '',
+    );
+    await _storage.write(
+      key: _zoneIdKey,
+      value:
+          userData['zone']?.toString() ?? userData['zoneId']?.toString() ?? '',
+    );
+  }
+
+  static bool isValidEmail(String email) {
+    return RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email.trim());
+  }
+
+  static String _loginErrorMessage(http.Response response) {
+    final serverMessage = _extractResponseMessage(response.body);
+
+    switch (response.statusCode) {
+      case 400:
+        return serverMessage ?? 'Please check your email and password.';
+      case 401:
+      case 403:
+        return 'Email or password is incorrect.';
+      case 404:
+        return 'No account found with this email address.';
+      case 408:
+        return 'The login request timed out. Please try again.';
+      case 429:
+        return 'Too many login attempts. Please wait and try again.';
+      case >= 500:
+        return 'Login service is temporarily unavailable. Please try again later.';
+      default:
+        return serverMessage ?? 'Unable to sign in. Please try again.';
+    }
+  }
+
+  static String? _extractResponseMessage(String responseBody) {
+    if (responseBody.trim().isEmpty) return null;
+
+    try {
+      final decoded = jsonDecode(responseBody);
+      if (decoded is Map) {
+        final message =
+            decoded['message'] ?? decoded['Message'] ?? decoded['title'];
+        if (message != null && message.toString().trim().isNotEmpty) {
+          final text = message.toString().trim();
+          if (_isTechnicalLoginMessage(text)) return null;
+          return text;
+        }
+      }
+    } catch (_) {
+      final text = responseBody.trim();
+      if (text.isNotEmpty && !_isTechnicalLoginMessage(text)) {
+        return text;
+      }
+    }
+
+    return null;
+  }
+
+  static bool _isTechnicalLoginMessage(String message) {
+    final lower = message.toLowerCase();
+    return lower == 'unauthorized' ||
+        lower.contains('status code') ||
+        lower.contains('server error') ||
+        lower.contains('http');
+  }
+
   /// Performs a real login by hitting the auth service.
   static Future<String?> login(String email, String password) async {
     try {
       debugPrint('🔐 [AuthService] Attempting login for: $email');
-      
-      final response = await http.post(
-        Uri.parse(AppConfig.loginEndpoint),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-          'password': password,
-        }),
-      ).timeout(const Duration(seconds: 10));
+
+      final response = await http
+          .post(
+            Uri.parse(AppConfig.loginEndpoint),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'email': email,
+              'password': password,
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
 
       debugPrint('🔐 [AuthService] Login Status: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> body = jsonDecode(response.body);
-        
+
         if (body['status'] == 1) {
           final userData = body['data'];
-          
+
           // Extract token from set-cookie header or response body
           String token = '';
           if (body['token'] != null) {
             token = body['token'].toString();
-          } else if (userData != null && userData is Map && userData['token'] != null) {
+          } else if (userData != null &&
+              userData is Map &&
+              userData['token'] != null) {
             token = userData['token'].toString();
           }
 
@@ -72,32 +155,38 @@ class AuthService {
             }
           }
           if (token.isEmpty) {
-            debugPrint('⚠️ [AuthService] auth_token not found in cookies or response body. Using fallback "valid_session".');
+            debugPrint(
+                '⚠️ [AuthService] auth_token not found in cookies or response body. Using fallback "valid_session".');
             token = 'valid_session';
           }
 
           // Persist session and user details from the REAL response
           await _storage.write(key: _cookieKey, value: token);
           await _storage.write(key: _emailKey, value: email);
-          await _storage.write(key: _userDataKey, value: jsonEncode(userData));
-          
-          // Use dynamic fields from API response
-          await _storage.write(key: _companyIdKey, value: userData['company']?.toString() ?? '');
-          await _storage.write(key: _bucketKey, value: userData['bucket']?.toString() ?? '');
-          await _storage.write(key: _siteIdKey, value: userData['site']?.toString() ?? '');
-          await _storage.write(key: _zoneIdKey, value: userData['zone']?.toString() ?? '');
+          if (userData is Map) {
+            await _persistUserData(Map<String, dynamic>.from(userData));
+          }
 
-          debugPrint('✅ [AuthService] Login successful. Data persisted for bucket: ${userData['bucket']}');
+          debugPrint(
+              '✅ [AuthService] Login successful. Data persisted for bucket: ${userData['bucket']}');
           return null; // Success
         } else {
-          return body['message'] ?? 'Login failed';
+          final message = body['message'] ?? body['Message'] ?? body['title'];
+          if (message != null && message.toString().trim().isNotEmpty) {
+            final text = message.toString().trim();
+            if (!_isTechnicalLoginMessage(text)) return text;
+          }
+          return 'Email or password is incorrect.';
         }
       } else {
-        return 'Server error: ${response.statusCode}';
+        return _loginErrorMessage(response);
       }
+    } on TimeoutException {
+      debugPrint('❌ [AuthService] Login timeout');
+      return 'The login request timed out. Please try again.';
     } catch (e) {
       debugPrint('❌ [AuthService] Login Exception: $e');
-      return 'Connection error: $e';
+      return 'Unable to connect. Please check your internet connection and try again.';
     }
   }
 
@@ -111,14 +200,14 @@ class AuthService {
     try {
       final token = await _storage.read(key: _cookieKey);
       final companyId = await _storage.read(key: _companyIdKey);
-      
+
       if (token == null || token.isEmpty) {
         debugPrint('🔐 [AuthService] No active token. Skipping silent login.');
         return;
       }
 
       bool needLogin = companyId == null || companyId.isEmpty;
-      
+
       if (!needLogin) {
         // Double check session validity with the backend verify endpoint.
         final response = await http.get(
@@ -140,7 +229,8 @@ class AuthService {
       }
 
       if (needLogin) {
-        debugPrint('🔐 [AuthService] Session invalid or expired. Performing silent background login...');
+        debugPrint(
+            '🔐 [AuthService] Session invalid or expired. Performing silent background login...');
         final error = await login('dharunsuperadmin@sustainabyte.ai', '123');
         if (error != null) {
           debugPrint('❌ [AuthService] Silent login failed: $error');
@@ -172,7 +262,12 @@ class AuthService {
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body);
         if (body['status'] == 1) {
-          return body['data'];
+          final data = body['data'];
+          if (data is Map) {
+            final userData = Map<String, dynamic>.from(data);
+            await _persistUserData(userData);
+            return userData;
+          }
         }
       }
       return null;
@@ -221,7 +316,10 @@ class AuthService {
   /// Extract the active company ID from saved user data.
   static String? extractCompanyId(Map<String, dynamic>? userData) {
     if (userData == null) return null;
-    final companyField = userData['company'] ?? userData['Company'];
+    final companyField = userData['company'] ??
+        userData['Company'] ??
+        userData['companyId'] ??
+        userData['company_id'];
     if (companyField == null) return null;
 
     if (companyField is List && companyField.isNotEmpty) {
@@ -316,9 +414,7 @@ class AuthService {
   /// Check if the given role is a site-level admin (explicit siteadmin variants only).
   static bool isSiteAdminRole(String role) {
     final r = role.toLowerCase().trim();
-    return r == 'siteadmin' ||
-        r == 'site_admin' ||
-        r == 'site admin';
+    return r == 'siteadmin' || r == 'site_admin' || r == 'site admin';
   }
 
   /// Persist the active site/company context before opening the employee dashboard.
@@ -336,16 +432,23 @@ class AuthService {
     if (bucket != null && bucket.isNotEmpty) {
       await _storage.write(key: _bucketKey, value: bucket);
     }
-    debugPrint('✅ [AuthService] Selected site=$siteId company=$companyId zone=$zoneId');
+    debugPrint(
+        '✅ [AuthService] Selected site=$siteId company=$companyId zone=$zoneId');
   }
 
   /// Check if the company has access to an AC Monitoring System.
   static Future<bool> checkAcSystemAccess(String companyId) async {
     try {
+      debugPrint(
+          '🔎 [AuthService] checkAcSystemAccess started. companyId=$companyId');
       final token = await _storage.read(key: _cookieKey);
-      if (token == null || token.isEmpty) return false;
+      if (token == null || token.isEmpty) {
+        debugPrint('⚠️ [AuthService] check-ac-access skipped: token missing');
+        return false;
+      }
 
-      final url = '${AppConfig.provisionBaseUrl}/systems/check-ac-access?companyId=${Uri.encodeComponent(companyId)}';
+      final url =
+          '${AppConfig.provisionBaseUrl}/systems/check-ac-access?companyId=${Uri.encodeComponent(companyId)}';
       debugPrint('📡 [AuthService] GET $url');
 
       final response = await http.get(
@@ -357,16 +460,102 @@ class AuthService {
         },
       ).timeout(const Duration(seconds: 10));
 
+      debugPrint(
+          '📡 [AuthService] check-ac-access status=${response.statusCode}');
+      debugPrint('📡 [AuthService] check-ac-access body=${response.body}');
+
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body);
-        if (body is Map && body['hasAcSystem'] == true) {
+        if (body is Map &&
+            (body['hasAcSystem'] == true ||
+                body['hasAccess'] == true ||
+                body['data'] == true)) {
+          debugPrint('✅ [AuthService] AC access allowed');
           return true;
         }
       }
+
+      if (_isCheckAcAccessRouteCollision(response)) {
+        debugPrint(
+            '⚠️ [AuthService] check-ac-access route collision detected. Falling back to /systems list.');
+        return _checkAcSystemAccessFromSystems(companyId, token);
+      }
+
+      debugPrint('🚫 [AuthService] AC access denied');
       return false;
     } catch (e) {
       debugPrint('❌ [AuthService] checkAcSystemAccess error: $e');
       return false;
     }
+  }
+
+  static bool _isCheckAcAccessRouteCollision(http.Response response) {
+    if (response.statusCode != 400) return false;
+
+    try {
+      final body = jsonDecode(response.body);
+      return body is Map &&
+          body['errors'] is Map &&
+          (body['errors'] as Map).containsKey('systemId') &&
+          response.body.contains('check-ac-access');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> _checkAcSystemAccessFromSystems(
+    String companyId,
+    String token,
+  ) async {
+    try {
+      final url =
+          '${AppConfig.provisionBaseUrl}/systems?companyId=${Uri.encodeComponent(companyId)}';
+      debugPrint('📡 [AuthService] Fallback GET $url');
+
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Cookie': 'auth_token=$token',
+          'Content-Type': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      debugPrint(
+          '📡 [AuthService] fallback systems status=${response.statusCode}');
+      debugPrint('📡 [AuthService] fallback systems body=${response.body}');
+
+      if (response.statusCode != 200) return false;
+
+      final decoded = jsonDecode(response.body);
+      final systems = decoded is Map ? decoded['data'] : decoded;
+      if (systems is! List) return false;
+
+      final hasAcSystem = systems.any((item) {
+        if (item is! Map) return false;
+        return _isAcMonitoringSystem(Map<String, dynamic>.from(item));
+      });
+
+      debugPrint('🔎 [AuthService] fallback AC system found=$hasAcSystem');
+      return hasAcSystem;
+    } catch (e) {
+      debugPrint('❌ [AuthService] fallback AC access check error: $e');
+      return false;
+    }
+  }
+
+  static bool _isAcMonitoringSystem(Map<String, dynamic> system) {
+    final systemType = system['systemType'] ?? system['SystemType'];
+    final typeName = systemType is Map
+        ? (systemType['name'] ?? systemType['Name'] ?? '').toString()
+        : systemType?.toString() ?? '';
+    final name =
+        (system['name'] ?? system['Name'] ?? system['systemName'] ?? '')
+            .toString();
+
+    final searchable = '$typeName $name'.toLowerCase();
+    return searchable.contains('ac monitoring') ||
+        searchable.contains('ac_monitoring') ||
+        searchable.contains('acmonitoring');
   }
 }

@@ -21,8 +21,8 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
   bool _needsUpdate = false;
 
   static const Color _themeGreen = Color.fromARGB(255, 123, 159, 71);
-  static const Color _background = Color(0xFF1A1A2E);
-  static const Color _cardBackground = Color(0xFF2D2D44);
+  Color get _background => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardBackground => Theme.of(context).cardColor;
 
   @override
   void initState() {
@@ -350,6 +350,9 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
     final device = result.device;
     final rssi = result.rssi;
     final name = device.name ?? "Unknown Device";
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : const Color(0xFF1B172E);
+    final textSecondaryColor = isDark ? Colors.white70 : const Color(0xFF5A6E85);
 
     return Card(
       color: _cardBackground,
@@ -370,11 +373,11 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
         ),
         title: Text(
           name,
-          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+          style: TextStyle(fontWeight: FontWeight.bold, color: textColor),
         ),
         subtitle: Text(
           "${device.address}\nRSSI: $rssi dBm",
-          style: const TextStyle(fontSize: 12, color: Colors.white70),
+          style: TextStyle(fontSize: 12, color: textSecondaryColor),
         ),
         isThreeLine: true,
         trailing: ElevatedButton(
@@ -510,7 +513,9 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
                         border: Border.all(
                           color: _showIRBlasterOnly
                               ? const Color(0xFF5E35B1)
-                              : Colors.white54,
+                              : (Theme.of(context).brightness == Brightness.dark
+                                  ? Colors.white54
+                                  : Colors.black26),
                           width: 2,
                         ),
                         borderRadius: BorderRadius.circular(4),
@@ -524,12 +529,14 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
                           : null,
                     ),
                     const SizedBox(width: 12),
-                    const Text(
+                    Text(
                       "Sustainabyte Devices Only",
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w500,
-                        color: Colors.white,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.white
+                            : const Color(0xFF1B172E),
                       ),
                     ),
                   ],
@@ -570,7 +577,12 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
                                 ? "No Sustainabyte devices found.\nUncheck the filter to see all devices."
                                 : "No devices found.\nTap 'Scan Devices' to search again.",
                         textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 14, color: Colors.white70),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Colors.white70
+                              : const Color(0xFF5A6E85),
+                        ),
                       ),
                     ),
             ),

@@ -25,29 +25,47 @@ class AdminUser {
 
   factory AdminUser.fromJson(Map<String, dynamic> json) {
     return AdminUser(
-      userId: (json['userId'] ?? json['SiteTechnicianId'] ?? json['siteTechnicianId'] ?? json['companyAdminId'] ?? json['adminId'] ?? json['_id'] ?? '').toString(),
+      userId: (json['userId'] ??
+              json['SiteTechnicianId'] ??
+              json['siteTechnicianId'] ??
+              json['companyAdminId'] ??
+              json['adminId'] ??
+              json['_id'] ??
+              '')
+          .toString(),
       name: (json['name'] ?? json['Name'] ?? json['userName'] ?? '').toString(),
       email: (json['email'] ?? json['Email'] ?? '').toString(),
       role: (json['role'] ?? json['Role'] ?? '').toString(),
-      company: (json['company'] ?? json['Company'] ?? json['CompanyId'] ?? json['companyId'] ?? '').toString(),
-      site: (json['site'] ?? json['Site'] ?? json['SiteId'] ?? json['siteId'] ?? '').toString(),
+      company: (json['company'] ??
+              json['Company'] ??
+              json['CompanyId'] ??
+              json['companyId'] ??
+              '')
+          .toString(),
+      site: (json['site'] ??
+              json['Site'] ??
+              json['SiteId'] ??
+              json['siteId'] ??
+              '')
+          .toString(),
       bucket: (json['bucket'] ?? json['Bucket'] ?? '').toString(),
       serviceType: (json['serviceType'] ?? json['ServiceType'])?.toString(),
-      zoneId: (json['zoneId'] ?? json['zone'] ?? json['ZoneId'] ?? json['Zone'])?.toString(),
+      zoneId: (json['zoneId'] ?? json['zone'] ?? json['ZoneId'] ?? json['Zone'])
+          ?.toString(),
     );
   }
 
   Map<String, dynamic> toJson() => {
-    'userId': userId,
-    'name': name,
-    'email': email,
-    'role': role,
-    'company': company,
-    'site': site,
-    'bucket': bucket,
-    if (serviceType != null) 'serviceType': serviceType,
-    if (zoneId != null) 'zoneId': zoneId,
-  };
+        'userId': userId,
+        'name': name,
+        'email': email,
+        'role': role,
+        'company': company,
+        'site': site,
+        'bucket': bucket,
+        if (serviceType != null) 'serviceType': serviceType,
+        if (zoneId != null) 'zoneId': zoneId,
+      };
 }
 
 class Company {
@@ -74,7 +92,8 @@ class Company {
   factory Company.fromJson(Map<String, dynamic> json) {
     return Company(
       companyId: (json['companyId'] ?? json['_id'] ?? '').toString(),
-      name: (json['name'] ?? json['companyName'] ?? 'Unnamed Company').toString(),
+      name:
+          (json['name'] ?? json['companyName'] ?? 'Unnamed Company').toString(),
       bucket: json['bucket']?.toString(),
       city: json['city']?.toString(),
       state: json['state']?.toString(),
@@ -92,15 +111,15 @@ class Company {
   }
 
   Map<String, dynamic> toJson() => {
-    'companyId': companyId,
-    'name': name,
-    'bucket': bucket,
-    'city': city,
-    'state': state,
-    'country': country,
-    'latitude': latitude,
-    'longitude': longitude,
-  };
+        'companyId': companyId,
+        'name': name,
+        'bucket': bucket,
+        'city': city,
+        'state': state,
+        'country': country,
+        'latitude': latitude,
+        'longitude': longitude,
+      };
 }
 
 class Site {
@@ -144,8 +163,12 @@ class Site {
       city: json['city']?.toString(),
       state: json['state']?.toString(),
       country: json['country']?.toString(),
-      latitude: parseCoordinate(json['latitude'] ?? json['lat'] ?? json['Latitude'], isLatitude: true),
-      longitude: parseCoordinate(json['longitude'] ?? json['lng'] ?? json['lon'] ?? json['Longitude'], isLatitude: false),
+      latitude: parseCoordinate(
+          json['latitude'] ?? json['lat'] ?? json['Latitude'],
+          isLatitude: true),
+      longitude: parseCoordinate(
+          json['longitude'] ?? json['lng'] ?? json['lon'] ?? json['Longitude'],
+          isLatitude: false),
     );
   }
 
@@ -191,19 +214,19 @@ class Site {
   }
 
   Map<String, dynamic> toJson() => {
-    'siteId': siteId,
-    'name': name,
-    'shortId': shortId,
-    'companyId': companyId,
-    'spocName': spocName,
-    'spocEmail': spocEmail,
-    'zoneId': zoneId,
-    'city': city,
-    'state': state,
-    'country': country,
-    'latitude': latitude,
-    'longitude': longitude,
-  };
+        'siteId': siteId,
+        'name': name,
+        'shortId': shortId,
+        'companyId': companyId,
+        'spocName': spocName,
+        'spocEmail': spocEmail,
+        'zoneId': zoneId,
+        'city': city,
+        'state': state,
+        'country': country,
+        'latitude': latitude,
+        'longitude': longitude,
+      };
 }
 
 class Zone {
@@ -222,8 +245,11 @@ class Zone {
   factory Zone.fromJson(Map<String, dynamic> json) {
     return Zone(
       zoneId: json['zoneId']?.toString() ?? json['ZoneId']?.toString() ?? '',
-      companyId: json['companyId']?.toString() ?? json['CompanyId']?.toString() ?? '',
-      name: json['name']?.toString() ?? json['Name']?.toString() ?? 'Unnamed Zone',
+      companyId:
+          json['companyId']?.toString() ?? json['CompanyId']?.toString() ?? '',
+      name: json['name']?.toString() ??
+          json['Name']?.toString() ??
+          'Unnamed Zone',
       shortId: json['shortId']?.toString() ?? json['ShortId']?.toString() ?? '',
     );
   }

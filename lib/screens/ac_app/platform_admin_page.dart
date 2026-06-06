@@ -8,6 +8,9 @@ import 'package:ir_blaster_ac/core/services/auth_service.dart';
 import 'package:ir_blaster_ac/screens/ac_app/sigin.dart';
 import 'package:ir_blaster_ac/screens/ac_app/company_sites_page.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import 'package:ir_blaster_ac/core/theme/theme_provider.dart';
 
 class PlatformAdminPage extends StatefulWidget {
   final String? companyId;
@@ -22,6 +25,108 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
     with SingleTickerProviderStateMixin {
   List<Company> companies = [];
   bool isLoading = false;
+
+  bool _isDarkTheme = true;
+
+  Color get _bgColor => Theme.of(context).scaffoldBackgroundColor;
+  // Color get _cardColor => Theme.of(context).cardColor;
+  // Color get _cardColor => Theme.of(context).cardColor;
+  Color get _cardColor =>
+      _isDarkTheme ? const Color(0xFF2A244D) : const Color(0xFFF8FCF3);
+  Color get _textColor => _isDarkTheme ? Colors.white : const Color(0xFF1B172E);
+  Color get _textbody => _isDarkTheme ? Colors.white : const Color(0xFF4A8908);
+  Color get _textSecondaryColor =>
+      _isDarkTheme ? Colors.white70 : const Color(0xFF52616B);
+  Color get _textMutedColor =>
+      _isDarkTheme ? Colors.white38 : const Color(0xFF8A9EAD);
+  Color get _appBarIconColor =>
+      _isDarkTheme ? Colors.white : const Color(0xFF1B172E);
+  Color get _appBarTextColor => Colors.white;
+  Color get _dialogBgColor => Theme.of(context).cardColor;
+  Color get _dividerColor =>
+      _isDarkTheme ? Colors.white12 : const Color(0xFFD8E6CE);
+  Color get _shadowColor => _isDarkTheme
+      ? Colors.black26
+      : const Color(0xFF6CC042).withValues(alpha: 0.10);
+
+  void _showThemePreferencesDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: _dialogBgColor,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text(
+            'Theme Preferences',
+            style: GoogleFonts.poppins(
+              color: _textbody,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<bool>(
+                title: Text(
+                  'Dark Theme',
+                  style: GoogleFonts.poppins(color: _textbody),
+                ),
+                subtitle: Text(
+                  'Sleek dark purple & green',
+                  style: GoogleFonts.poppins(color: _textbody, fontSize: 11),
+                ),
+                value: true,
+                groupValue: _isDarkTheme,
+                activeColor: AppColors.button,
+                onChanged: (val) {
+                  if (val != null) {
+                    setDialogState(() {
+                      _isDarkTheme = val;
+                    });
+                    Provider.of<ThemeProvider>(context, listen: false)
+                        .setDarkMode(val);
+                  }
+                },
+              ),
+              RadioListTile<bool>(
+                title: Text(
+                  'Light Theme',
+                  style: GoogleFonts.poppins(color: _textbody),
+                ),
+                subtitle: Text(
+                  'Clean white & green / dark blue',
+                  style: GoogleFonts.poppins(color: _textbody, fontSize: 11),
+                ),
+                value: false,
+                groupValue: _isDarkTheme,
+                activeColor: AppColors.button,
+                onChanged: (val) {
+                  if (val != null) {
+                    setDialogState(() {
+                      _isDarkTheme = val;
+                    });
+                    Provider.of<ThemeProvider>(context, listen: false)
+                        .setDarkMode(val);
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                'Close',
+                style: GoogleFonts.poppins(
+                    color: AppColors.button, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   // Google Maps Controller
   GoogleMapController? _mapController;
@@ -210,8 +315,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
       return;
     }
 
-    double minLat = positions.first.latitude,
-        maxLat = positions.first.latitude;
+    double minLat = positions.first.latitude, maxLat = positions.first.latitude;
     double minLng = positions.first.longitude,
         maxLng = positions.first.longitude;
     for (final pos in positions) {
@@ -530,17 +634,17 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: AppColors.secondaryBackground,
+        backgroundColor: _dialogBgColor,
         title: Text('Delete Company Admin',
             style: GoogleFonts.poppins(
-                color: Colors.white, fontWeight: FontWeight.bold)),
+                color: _textColor, fontWeight: FontWeight.bold)),
         content: Text('Are you sure you want to delete this company admin?',
-            style: GoogleFonts.poppins(color: Colors.white70)),
+            style: GoogleFonts.poppins(color: _textSecondaryColor)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
               child: Text('Cancel',
-                  style: GoogleFonts.poppins(color: Colors.white38))),
+                  style: GoogleFonts.poppins(color: _textMutedColor))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
               child: Text('Delete',
@@ -619,12 +723,12 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: AppColors.secondaryBackground,
+          backgroundColor: _dialogBgColor,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Text('Edit Company Admin',
               style: GoogleFonts.poppins(
-                  color: Colors.white, fontWeight: FontWeight.bold)),
+                  color: _textColor, fontWeight: FontWeight.bold)),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -641,8 +745,8 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   value: _selectedCompanyId,
-                  dropdownColor: AppColors.secondaryBackground,
-                  style: GoogleFonts.poppins(color: Colors.white),
+                  dropdownColor: _dialogBgColor,
+                  style: GoogleFonts.poppins(color: _textColor),
                   decoration: _inputDecoration(
                       'Assign Company', Icons.business_outlined),
                   items: companies
@@ -665,7 +769,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                 Navigator.pop(context);
               },
               child: Text('Cancel',
-                  style: GoogleFonts.poppins(color: Colors.white38)),
+                  style: GoogleFonts.poppins(color: _textMutedColor)),
             ),
             ElevatedButton(
               onPressed: _isEditingAdmin
@@ -701,12 +805,12 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: AppColors.secondaryBackground,
+          backgroundColor: _dialogBgColor,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Text('New Company Admin',
               style: GoogleFonts.poppins(
-                  color: Colors.white, fontWeight: FontWeight.bold)),
+                  color: _textColor, fontWeight: FontWeight.bold)),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -726,8 +830,8 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
                   initialValue: _selectedCompanyId,
-                  dropdownColor: AppColors.secondaryBackground,
-                  style: GoogleFonts.poppins(color: Colors.white),
+                  dropdownColor: _dialogBgColor,
+                  style: GoogleFonts.poppins(color: _textColor),
                   decoration: _inputDecoration(
                       'Assign Company', Icons.business_outlined),
                   items: companies
@@ -747,7 +851,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: Text('Cancel',
-                  style: GoogleFonts.poppins(color: Colors.white38)),
+                  style: GoogleFonts.poppins(color: _textMutedColor)),
             ),
             ElevatedButton(
               onPressed: _isAddingAdmin
@@ -818,17 +922,17 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: AppColors.secondaryBackground,
+        backgroundColor: _dialogBgColor,
         title: Text('Delete Site Admin',
             style: GoogleFonts.poppins(
-                color: Colors.white, fontWeight: FontWeight.bold)),
+                color: _textColor, fontWeight: FontWeight.bold)),
         content: Text('Are you sure you want to delete this site admin?',
-            style: GoogleFonts.poppins(color: Colors.white70)),
+            style: GoogleFonts.poppins(color: _textSecondaryColor)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
               child: Text('Cancel',
-                  style: GoogleFonts.poppins(color: Colors.white38))),
+                  style: GoogleFonts.poppins(color: _textMutedColor))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
               child: Text('Delete',
@@ -921,12 +1025,12 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
           }
 
           return AlertDialog(
-            backgroundColor: AppColors.secondaryBackground,
+            backgroundColor: _dialogBgColor,
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             title: Text('Edit Site Admin',
                 style: GoogleFonts.poppins(
-                    color: Colors.white, fontWeight: FontWeight.bold)),
+                    color: _textColor, fontWeight: FontWeight.bold)),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -944,8 +1048,8 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     value: _selectedCompanyId,
-                    dropdownColor: AppColors.secondaryBackground,
-                    style: GoogleFonts.poppins(color: Colors.white),
+                    dropdownColor: _dialogBgColor,
+                    style: GoogleFonts.poppins(color: _textColor),
                     decoration: _inputDecoration(
                         'Assign Company', Icons.business_outlined),
                     items: companies
@@ -967,8 +1071,8 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     value: _selectedSiteId,
-                    dropdownColor: AppColors.secondaryBackground,
-                    style: GoogleFonts.poppins(color: Colors.white),
+                    dropdownColor: _dialogBgColor,
+                    style: GoogleFonts.poppins(color: _textColor),
                     decoration: _inputDecoration(
                         _loadingSites ? 'Loading sites...' : 'Select Site',
                         Icons.location_city_outlined),
@@ -999,7 +1103,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                   Navigator.pop(context);
                 },
                 child: Text('Cancel',
-                    style: GoogleFonts.poppins(color: Colors.white38)),
+                    style: GoogleFonts.poppins(color: _textMutedColor)),
               ),
               ElevatedButton(
                 onPressed: _isAddingAdmin
@@ -1043,12 +1147,12 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
             _fetchSitesForSelectedCompany(_selectedCompanyId!, setDialogState);
           }
           return AlertDialog(
-            backgroundColor: AppColors.secondaryBackground,
+            backgroundColor: _dialogBgColor,
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             title: Text('New Site Admin',
                 style: GoogleFonts.poppins(
-                    color: Colors.white, fontWeight: FontWeight.bold)),
+                    color: _textColor, fontWeight: FontWeight.bold)),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1070,8 +1174,8 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
                     value: _selectedCompanyId,
-                    dropdownColor: AppColors.secondaryBackground,
-                    style: GoogleFonts.poppins(color: Colors.white),
+                    dropdownColor: _dialogBgColor,
+                    style: GoogleFonts.poppins(color: _textColor),
                     decoration: _inputDecoration(
                         'Select Company', Icons.business_outlined),
                     items: companies
@@ -1093,8 +1197,8 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     value: _selectedSiteId,
-                    dropdownColor: AppColors.secondaryBackground,
-                    style: GoogleFonts.poppins(color: Colors.white),
+                    dropdownColor: _dialogBgColor,
+                    style: GoogleFonts.poppins(color: _textColor),
                     decoration: _inputDecoration(
                         _loadingSites ? 'Loading sites...' : 'Select Site',
                         Icons.location_city_outlined),
@@ -1122,7 +1226,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
               TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: Text('Cancel',
-                    style: GoogleFonts.poppins(color: Colors.white38)),
+                    style: GoogleFonts.poppins(color: _textMutedColor)),
               ),
               ElevatedButton(
                 onPressed: _isAddingAdmin
@@ -1155,7 +1259,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
       controller: controller,
       obscureText: obscureText,
       keyboardType: keyboardType,
-      style: GoogleFonts.poppins(color: Colors.white, fontSize: 14),
+      style: GoogleFonts.poppins(color: _textColor, fontSize: 14),
       decoration: _inputDecoration(hint, icon),
     );
   }
@@ -1163,11 +1267,12 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
   InputDecoration _inputDecoration(String hint, IconData icon) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: GoogleFonts.poppins(color: Colors.white38, fontSize: 13),
-      prefixIcon: Icon(icon, color: Colors.white54, size: 18),
+      hintStyle: GoogleFonts.poppins(color: _textMutedColor, fontSize: 13),
+      prefixIcon: Icon(icon, color: _textSecondaryColor, size: 18),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       filled: true,
-      fillColor: Colors.black12,
+      fillColor:
+          _isDarkTheme ? Colors.black12 : Colors.black.withValues(alpha: 0.05),
       border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
     );
@@ -1177,17 +1282,17 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: AppColors.secondaryBackground,
+        backgroundColor: _dialogBgColor,
         title: Text('Logout',
             style: GoogleFonts.poppins(
-                color: Colors.white, fontWeight: FontWeight.bold)),
+                color: _textColor, fontWeight: FontWeight.bold)),
         content: Text('Are you sure you want to logout?',
-            style: GoogleFonts.poppins(color: Colors.white70)),
+            style: GoogleFonts.poppins(color: _textSecondaryColor)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
             child: Text('Cancel',
-                style: GoogleFonts.poppins(color: Colors.white38)),
+                style: GoogleFonts.poppins(color: _textMutedColor)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
@@ -1223,17 +1328,20 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
 
   @override
   Widget build(BuildContext context) {
+    _isDarkTheme = Provider.of<ThemeProvider>(context).isDarkMode;
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: _bgColor,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: _isDarkTheme
+            ? const Color(0xFF2A244D)
+            : const Color.fromARGB(223, 74, 137, 8),
         elevation: 0,
         leading: Container(
           margin: const EdgeInsets.only(left: 16),
           alignment: Alignment.center,
-          child: const Icon(
+          child: Icon(
             Icons.gpp_good_outlined,
-            color: Color(0xFF6CC042),
+            color: _isDarkTheme ? const Color(0xFF6CC042) : Colors.white,
             size: 28,
           ),
         ),
@@ -1241,21 +1349,44 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
         title: Text(
           'Platform Admin',
           style: GoogleFonts.poppins(
-            color: Colors.white,
+            color: _appBarTextColor,
             fontWeight: FontWeight.bold,
             fontSize: 18,
           ),
         ),
         actions: [
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, color: Colors.white),
-            color: AppColors.secondaryBackground,
+            icon: Icon(Icons.more_vert, color: _appBarIconColor),
+            color: _dialogBgColor,
             onSelected: (value) {
               if (value == 'logout') {
                 _logout();
+              } else if (value == 'theme') {
+                _showThemePreferencesDialog();
               }
             },
             itemBuilder: (BuildContext context) => [
+              PopupMenuItem<String>(
+                value: 'theme',
+                child: Row(
+                  children: [
+                    Icon(
+                      _isDarkTheme
+                          ? Icons.light_mode_rounded
+                          : Icons.dark_mode_rounded,
+                      color: _isDarkTheme
+                          ? Colors.orangeAccent
+                          : const Color(0xFF1B172E),
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _isDarkTheme ? 'Light Theme' : 'Dark Theme',
+                      style: GoogleFonts.poppins(color: _textbody),
+                    ),
+                  ],
+                ),
+              ),
               PopupMenuItem<String>(
                 value: 'logout',
                 child: Row(
@@ -1264,7 +1395,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                         color: Colors.redAccent, size: 18),
                     const SizedBox(width: 8),
                     Text('Logout',
-                        style: GoogleFonts.poppins(color: Colors.white)),
+                        style: GoogleFonts.poppins(color: _textColor)),
                   ],
                 ),
               ),
@@ -1273,9 +1404,16 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
         ],
         bottom: TabBar(
           controller: _tabController,
-          indicatorColor: AppColors.button,
-          labelColor: AppColors.button,
-          unselectedLabelColor: Colors.white54,
+          indicator: UnderlineTabIndicator(
+            borderSide: BorderSide(
+              color: _isDarkTheme
+                  ? const Color(0xFF6CC042)
+                  : const Color(0xFF242038),
+              width: 3,
+            ),
+          ),
+          labelColor: _isDarkTheme ? AppColors.button : const Color(0xFF1B172E),
+          unselectedLabelColor: _textSecondaryColor,
           labelStyle:
               GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold),
           tabs: const [
@@ -1355,7 +1493,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.2),
+                    color: _shadowColor,
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
@@ -1378,8 +1516,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                         position: pos,
                         infoWindow: InfoWindow(
                           title: c.name,
-                          snippet:
-                              '${c.city ?? ''}, ${c.state ?? ''}'.trim(),
+                          snippet: '${c.city ?? ''}, ${c.state ?? ''}'.trim(),
                         ),
                       ));
                     }
@@ -1415,7 +1552,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
             Text(
               'Companies on Map',
               style: GoogleFonts.poppins(
-                color: Colors.white,
+                color: _textColor,
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
               ),
@@ -1426,15 +1563,16 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                   'No companies on map.', Icons.location_off_rounded)
             else
               ...companies.map((comp) {
+                debugPrint('Companies: $companies');
                 return Container(
                   margin: const EdgeInsets.only(bottom: 10),
                   padding:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1A172E),
+                    color: _cardColor,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.05),
+                      color: _dividerColor,
                       width: 1,
                     ),
                   ),
@@ -1449,7 +1587,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                       Text(
                         comp.name,
                         style: GoogleFonts.poppins(
-                          color: Colors.white,
+                          color: _textbody,
                           fontWeight: FontWeight.w600,
                           fontSize: 14,
                         ),
@@ -1460,7 +1598,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                             ? '${comp.city}, ${comp.state ?? "Tamil Nadu"}'
                             : 'Chennai, Tamil Nadu',
                         style: GoogleFonts.poppins(
-                          color: Colors.white54,
+                          color: _textSecondaryColor,
                           fontSize: 11,
                         ),
                       ),
@@ -1474,7 +1612,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
             Text(
               'Company Selection',
               style: GoogleFonts.poppins(
-                color: Colors.white,
+                color: _textbody,
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
               ),
@@ -1483,7 +1621,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
             Text(
               'Select a company to view its dashboard',
               style: GoogleFonts.poppins(
-                color: Colors.white54,
+                color: _textbody,
                 fontSize: 12,
               ),
             ),
@@ -1510,10 +1648,10 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                     margin: const EdgeInsets.only(bottom: 16),
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1A172E),
+                      color: _cardColor,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.05),
+                        color: _dividerColor,
                         width: 1,
                       ),
                     ),
@@ -1539,7 +1677,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                               child: Text(
                                 comp.name,
                                 style: GoogleFonts.poppins(
-                                  color: Colors.white,
+                                  color: _textColor,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 16,
                                 ),
@@ -1585,16 +1723,11 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
         Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [
-                AppColors.secondaryBackground,
-                AppColors.secondaryBackground.withValues(alpha: 0.8)
-              ],
+              colors: [_cardColor, _cardColor.withValues(alpha: 0.8)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            border: Border(
-                bottom: BorderSide(
-                    color: AppColors.button.withValues(alpha: 0.2), width: 1)),
+            border: Border(bottom: BorderSide(color: _dividerColor, width: 1)),
           ),
           padding: const EdgeInsets.all(16.0),
           child: Column(
@@ -1606,26 +1739,31 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                     child: Container(
                       height: 48,
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.2),
+                        color: _isDarkTheme
+                            ? Colors.black.withValues(alpha: 0.2)
+                            : Colors.black.withValues(alpha: 0.03),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                            color: AppColors.button.withValues(alpha: 0.2),
+                            color: _isDarkTheme
+                                ? AppColors.button.withValues(alpha: 0.2)
+                                : const Color(0xFF1B172E)
+                                    .withValues(alpha: 0.1),
                             width: 1),
                       ),
                       child: TextField(
                         controller: _searchAdminController,
                         style: GoogleFonts.poppins(
-                            color: Colors.white, fontSize: 13),
+                            color: _textColor, fontSize: 13),
                         decoration: InputDecoration(
                           hintText: 'Search by name or email...',
                           hintStyle: GoogleFonts.poppins(
-                              color: Colors.white38, fontSize: 13),
+                              color: _textMutedColor, fontSize: 13),
                           prefixIcon: const Icon(Icons.search,
                               color: AppColors.button, size: 18),
                           suffixIcon: _searchAdminController.text.isNotEmpty
                               ? IconButton(
-                                  icon: const Icon(Icons.clear,
-                                      color: Colors.white38, size: 18),
+                                  icon: Icon(Icons.clear,
+                                      color: _textMutedColor, size: 18),
                                   onPressed: () {
                                     _searchAdminController.clear();
                                   },
@@ -1675,7 +1813,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                   Text(
                       '${companyAdmins.length} Enterprise Manager${companyAdmins.length != 1 ? 's' : ''}',
                       style: GoogleFonts.poppins(
-                          color: Colors.white70,
+                          color: _textSecondaryColor,
                           fontSize: 12,
                           fontWeight: FontWeight.w500)),
                   Container(
@@ -1712,11 +1850,11 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                       child: Container(
                         margin: const EdgeInsets.all(16.0),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF131127),
+                          color: _isDarkTheme
+                              ? const Color(0xFF131127)
+                              : Colors.white,
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.05),
-                              width: 1),
+                          border: Border.all(color: _dividerColor, width: 1),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1725,9 +1863,11 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 16, vertical: 16),
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF1A172E),
-                                borderRadius: BorderRadius.vertical(
+                              decoration: BoxDecoration(
+                                color: _isDarkTheme
+                                    ? const Color(0xFF1A172E)
+                                    : const Color(0xFFEFF7E9),
+                                borderRadius: const BorderRadius.vertical(
                                     top: Radius.circular(16)),
                               ),
                               child: Row(
@@ -1737,7 +1877,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                     child: Text(
                                       'Name',
                                       style: GoogleFonts.poppins(
-                                          color: Colors.white70,
+                                          color: _textSecondaryColor,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 13),
                                     ),
@@ -1747,7 +1887,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                     child: Text(
                                       'Email',
                                       style: GoogleFonts.poppins(
-                                          color: Colors.white70,
+                                          color: _textSecondaryColor,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 13),
                                     ),
@@ -1757,7 +1897,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                     child: Text(
                                       'Company',
                                       style: GoogleFonts.poppins(
-                                          color: Colors.white70,
+                                          color: _textSecondaryColor,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 13),
                                     ),
@@ -1769,7 +1909,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                       child: Text(
                                         'Actions',
                                         style: GoogleFonts.poppins(
-                                            color: Colors.white70,
+                                            color: _textSecondaryColor,
                                             fontWeight: FontWeight.bold,
                                             fontSize: 13),
                                       ),
@@ -1778,7 +1918,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                 ],
                               ),
                             ),
-                            const Divider(color: Colors.white10, height: 1),
+                            Divider(color: _dividerColor, height: 1),
                             // Table Rows
                             ...companyAdmins.map((admin) {
                               final compName = companies
@@ -1798,9 +1938,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                       ? null
                                       : Border(
                                           bottom: BorderSide(
-                                              color: Colors.white
-                                                  .withValues(alpha: 0.05),
-                                              width: 1)),
+                                              color: _dividerColor, width: 1)),
                                 ),
                                 child: Row(
                                   children: [
@@ -1809,7 +1947,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                       child: Text(
                                         admin.name,
                                         style: GoogleFonts.poppins(
-                                            color: Colors.white,
+                                            color: _textColor,
                                             fontWeight: FontWeight.w600,
                                             fontSize: 13),
                                       ),
@@ -1819,7 +1957,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                       child: Text(
                                         admin.email,
                                         style: GoogleFonts.poppins(
-                                            color: Colors.white54,
+                                            color: _textSecondaryColor,
                                             fontSize: 12),
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -1896,16 +2034,11 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
         Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [
-                AppColors.secondaryBackground,
-                AppColors.secondaryBackground.withValues(alpha: 0.8)
-              ],
+              colors: [_cardColor, _cardColor.withValues(alpha: 0.8)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            border: Border(
-                bottom: BorderSide(
-                    color: AppColors.button.withValues(alpha: 0.2), width: 1)),
+            border: Border(bottom: BorderSide(color: _dividerColor, width: 1)),
           ),
           padding: const EdgeInsets.all(16.0),
           child: Column(
@@ -1917,26 +2050,31 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                     child: Container(
                       height: 48,
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.2),
+                        color: _isDarkTheme
+                            ? Colors.black.withValues(alpha: 0.2)
+                            : Colors.black.withValues(alpha: 0.03),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                            color: AppColors.button.withValues(alpha: 0.2),
+                            color: _isDarkTheme
+                                ? AppColors.button.withValues(alpha: 0.2)
+                                : const Color(0xFF1B172E)
+                                    .withValues(alpha: 0.1),
                             width: 1),
                       ),
                       child: TextField(
                         controller: _searchSiteAdminController,
                         style: GoogleFonts.poppins(
-                            color: Colors.white, fontSize: 13),
+                            color: _textColor, fontSize: 13),
                         decoration: InputDecoration(
                           hintText: 'Search by name or email...',
                           hintStyle: GoogleFonts.poppins(
-                              color: Colors.white38, fontSize: 13),
+                              color: _textMutedColor, fontSize: 13),
                           prefixIcon: const Icon(Icons.search,
                               color: AppColors.button, size: 18),
                           suffixIcon: _searchSiteAdminController.text.isNotEmpty
                               ? IconButton(
-                                  icon: const Icon(Icons.clear,
-                                      color: Colors.white38, size: 18),
+                                  icon: Icon(Icons.clear,
+                                      color: _textMutedColor, size: 18),
                                   onPressed: () {
                                     _searchSiteAdminController.clear();
                                   },
@@ -1986,7 +2124,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                   Text(
                       '${siteAdmins.length} Site Admin${siteAdmins.length != 1 ? 's' : ''}',
                       style: GoogleFonts.poppins(
-                          color: Colors.white70,
+                          color: _textSecondaryColor,
                           fontSize: 12,
                           fontWeight: FontWeight.w500)),
                   Container(
@@ -2023,11 +2161,11 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                       child: Container(
                         margin: const EdgeInsets.all(16.0),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF131127),
+                          color: _isDarkTheme
+                              ? const Color(0xFF131127)
+                              : Colors.white,
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.05),
-                              width: 1),
+                          border: Border.all(color: _dividerColor, width: 1),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2036,9 +2174,11 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 16, vertical: 16),
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF1A172E),
-                                borderRadius: BorderRadius.vertical(
+                              decoration: BoxDecoration(
+                                color: _isDarkTheme
+                                    ? const Color(0xFF1A172E)
+                                    : const Color(0xFFEFF7E9),
+                                borderRadius: const BorderRadius.vertical(
                                     top: Radius.circular(16)),
                               ),
                               child: Row(
@@ -2048,7 +2188,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                     child: Text(
                                       'Name',
                                       style: GoogleFonts.poppins(
-                                          color: Colors.white70,
+                                          color: _textSecondaryColor,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 13),
                                     ),
@@ -2058,7 +2198,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                     child: Text(
                                       'Email',
                                       style: GoogleFonts.poppins(
-                                          color: Colors.white70,
+                                          color: _textSecondaryColor,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 13),
                                     ),
@@ -2068,7 +2208,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                     child: Text(
                                       'Site',
                                       style: GoogleFonts.poppins(
-                                          color: Colors.white70,
+                                          color: _textSecondaryColor,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 13),
                                     ),
@@ -2080,7 +2220,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                       child: Text(
                                         'Actions',
                                         style: GoogleFonts.poppins(
-                                            color: Colors.white70,
+                                            color: _textSecondaryColor,
                                             fontWeight: FontWeight.bold,
                                             fontSize: 13),
                                       ),
@@ -2089,7 +2229,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                 ],
                               ),
                             ),
-                            const Divider(color: Colors.white10, height: 1),
+                            Divider(color: _dividerColor, height: 1),
                             // Table Rows
                             ...siteAdmins.map((admin) {
                               final isLast = siteAdmins.indexOf(admin) ==
@@ -2102,9 +2242,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                       ? null
                                       : Border(
                                           bottom: BorderSide(
-                                              color: Colors.white
-                                                  .withValues(alpha: 0.05),
-                                              width: 1)),
+                                              color: _dividerColor, width: 1)),
                                 ),
                                 child: Row(
                                   children: [
@@ -2113,7 +2251,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                       child: Text(
                                         admin.name,
                                         style: GoogleFonts.poppins(
-                                            color: Colors.white,
+                                            color: _textColor,
                                             fontWeight: FontWeight.w600,
                                             fontSize: 13),
                                       ),
@@ -2123,7 +2261,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                       child: Text(
                                         admin.email,
                                         style: GoogleFonts.poppins(
-                                            color: Colors.white54,
+                                            color: _textSecondaryColor,
                                             fontSize: 12),
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -2203,12 +2341,14 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: Colors.white12, size: 48),
+            Icon(icon,
+                color: _isDarkTheme ? Colors.white12 : Colors.black12,
+                size: 48),
             const SizedBox(height: 16),
             Text(msg,
                 textAlign: TextAlign.center,
-                style:
-                    GoogleFonts.poppins(color: Colors.white54, fontSize: 13)),
+                style: GoogleFonts.poppins(
+                    color: _textSecondaryColor, fontSize: 13)),
           ],
         ),
       ),

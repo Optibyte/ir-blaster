@@ -13,10 +13,10 @@ class _ACControlPageState extends State<ACControlPage> {
   double _setTemperature = 24.0;
   double _actualTemperature = 32.5;
   double _humidity = 45.0;
-  
+
   TimeOfDay _scheduleStartTime = const TimeOfDay(hour: 9, minute: 0);
   TimeOfDay _scheduleEndTime = const TimeOfDay(hour: 18, minute: 0);
-  
+
   TimeOfDay _lunchStartTime = const TimeOfDay(hour: 12, minute: 30);
   TimeOfDay _lunchEndTime = const TimeOfDay(hour: 13, minute: 30);
 
@@ -70,11 +70,12 @@ class _ACControlPageState extends State<ACControlPage> {
                   color: primaryColor.withOpacity(0.1),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.power_settings_new_rounded, color: primaryColor, size: 28),
+                child: Icon(Icons.power_settings_new_rounded,
+                    color: primaryColor, size: 28),
               ),
             ],
           ),
-          
+
           const SizedBox(height: 30),
 
           // Actual Temperature - BIGGER as requested
@@ -84,7 +85,9 @@ class _ACControlPageState extends State<ACControlPage> {
               height: 260,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: isDark ? const Color(0xFF2A244D).withOpacity(0.5) : Colors.white,
+                color: isDark
+                    ? const Color(0xFF2A244D).withOpacity(0.5)
+                    : Colors.white,
                 boxShadow: [
                   BoxShadow(
                     color: primaryColor.withOpacity(0.1),
@@ -98,7 +101,9 @@ class _ACControlPageState extends State<ACControlPage> {
                   ),
                 ],
                 border: Border.all(
-                  color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03),
+                  color: isDark
+                      ? Colors.white.withOpacity(0.05)
+                      : Colors.black.withOpacity(0.03),
                   width: 2,
                 ),
               ),
@@ -112,7 +117,9 @@ class _ACControlPageState extends State<ACControlPage> {
                     child: CircularProgressIndicator(
                       value: _actualTemperature / 40,
                       strokeWidth: 12,
-                      backgroundColor: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03),
+                      backgroundColor: isDark
+                          ? Colors.white.withOpacity(0.05)
+                          : Colors.black.withOpacity(0.03),
                       valueColor: AlwaysStoppedAnimation<Color>(primaryColor),
                       strokeCap: StrokeCap.round,
                     ),
@@ -159,7 +166,8 @@ class _ACControlPageState extends State<ACControlPage> {
                       ),
                       const SizedBox(height: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 4),
                         decoration: BoxDecoration(
                           color: primaryColor.withOpacity(0.15),
                           borderRadius: BorderRadius.circular(20),
@@ -168,8 +176,10 @@ class _ACControlPageState extends State<ACControlPage> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Container(
-                              width: 6, height: 6,
-                              decoration: BoxDecoration(color: primaryColor, shape: BoxShape.circle),
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                  color: primaryColor, shape: BoxShape.circle),
                             ),
                             const SizedBox(width: 8),
                             Text(
@@ -202,8 +212,10 @@ class _ACControlPageState extends State<ACControlPage> {
                   icon: Icons.thermostat_rounded,
                   color: accentColor,
                   isDark: isDark,
-                  onIncrement: () => setState(() => _setTemperature = math.min(30, _setTemperature + 1)),
-                  onDecrement: () => setState(() => _setTemperature = math.max(16, _setTemperature - 1)),
+                  onIncrement: () => setState(() =>
+                      _setTemperature = math.min(30, _setTemperature + 1)),
+                  onDecrement: () => setState(() =>
+                      _setTemperature = math.max(16, _setTemperature - 1)),
                 ),
               ),
               const SizedBox(width: 16),
@@ -214,8 +226,10 @@ class _ACControlPageState extends State<ACControlPage> {
                   icon: Icons.water_drop_rounded,
                   color: Colors.indigoAccent,
                   isDark: isDark,
-                  onIncrement: () => setState(() => _humidity = math.min(100, _humidity + 5)),
-                  onDecrement: () => setState(() => _humidity = math.max(0, _humidity - 5)),
+                  onIncrement: () =>
+                      setState(() => _humidity = math.min(100, _humidity + 5)),
+                  onDecrement: () =>
+                      setState(() => _humidity = math.max(0, _humidity - 5)),
                 ),
               ),
             ],
@@ -273,7 +287,9 @@ class _ACControlPageState extends State<ACControlPage> {
         color: cardColor,
         borderRadius: BorderRadius.circular(28),
         border: Border.all(
-          color: isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.05),
+          color: isDark
+              ? Colors.white.withOpacity(0.06)
+              : Colors.black.withOpacity(0.05),
         ),
       ),
       child: Column(
@@ -335,7 +351,9 @@ class _ACControlPageState extends State<ACControlPage> {
         color: cardColor,
         borderRadius: BorderRadius.circular(28),
         border: Border.all(
-          color: isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.05),
+          color: isDark
+              ? Colors.white.withOpacity(0.06)
+              : Colors.black.withOpacity(0.05),
         ),
       ),
       child: Column(
@@ -370,7 +388,8 @@ class _ACControlPageState extends State<ACControlPage> {
                 ),
               ),
               const SizedBox(width: 20),
-              Icon(Icons.arrow_forward_rounded, color: textColor.withOpacity(0.2)),
+              Icon(Icons.arrow_forward_rounded,
+                  color: textColor.withOpacity(0.2)),
               const SizedBox(width: 20),
               Expanded(
                 child: _timePickerButton(
@@ -387,7 +406,8 @@ class _ACControlPageState extends State<ACControlPage> {
     );
   }
 
-  Widget _timePickerButton(String label, String time, bool isDark, VoidCallback onTap) {
+  Widget _timePickerButton(
+      String label, String time, bool isDark, VoidCallback onTap) {
     final textColor = isDark ? Colors.white : const Color(0xFF1B172E);
     return GestureDetector(
       onTap: onTap,
@@ -422,45 +442,68 @@ class _ACControlPageState extends State<ACControlPage> {
       child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05),
+          color: isDark
+              ? Colors.white.withOpacity(0.05)
+              : Colors.black.withOpacity(0.05),
           shape: BoxShape.circle,
         ),
-        child: Icon(icon, color: isDark ? Colors.white70 : Colors.black87, size: 20),
+        child: Icon(icon,
+            color: isDark ? Colors.white70 : Colors.black87, size: 20),
       ),
     );
   }
 
-  Future<void> _selectTime(BuildContext context, bool isSchedule, bool isStart) async {
-    final initialTime = isSchedule 
+  Future<void> _selectTime(
+      BuildContext context, bool isSchedule, bool isStart) async {
+    final initialTime = isSchedule
         ? (isStart ? _scheduleStartTime : _scheduleEndTime)
         : (isStart ? _lunchStartTime : _lunchEndTime);
-        
+
     final TimeOfDay? picked = await showTimePicker(
       context: context,
       initialTime: initialTime,
+      initialEntryMode: TimePickerEntryMode.input,
       builder: (context, child) {
         return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme.dark(
-              primary: const Color(0xFF6CC042),
+          data: ThemeData.dark().copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: Color(0xFF6CC042),
               onPrimary: Colors.white,
-              surface: const Color(0xFF2A244D),
+              surface: Color(0xFF131122),
               onSurface: Colors.white,
+            ),
+            dialogBackgroundColor: const Color(0xFF131122),
+            timePickerTheme: const TimePickerThemeData(
+              backgroundColor: Color(0xFF131122),
+              dialBackgroundColor: Color(0xFF1B172E),
+              dialHandColor: Color(0xFF6CC042),
+              dialTextColor: Colors.white,
+              entryModeIconColor: Colors.white,
+              hourMinuteColor: Color(0xFF1B172E),
+              hourMinuteTextColor: Colors.white,
+              dayPeriodColor: Color(0xFF1B172E),
+              dayPeriodTextColor: Colors.white,
+              dayPeriodBorderSide: BorderSide.none,
+              helpTextStyle: TextStyle(color: Colors.white),
             ),
           ),
           child: child!,
         );
       },
     );
-    
+
     if (picked != null) {
       setState(() {
         if (isSchedule) {
-          if (isStart) _scheduleStartTime = picked;
-          else _scheduleEndTime = picked;
+          if (isStart)
+            _scheduleStartTime = picked;
+          else
+            _scheduleEndTime = picked;
         } else {
-          if (isStart) _lunchStartTime = picked;
-          else _lunchEndTime = picked;
+          if (isStart)
+            _lunchStartTime = picked;
+          else
+            _lunchEndTime = picked;
         }
       });
     }

@@ -36,52 +36,67 @@ class _SignInPageState extends State<SignInPage> {
       return;
     }
 
+    if (!AuthService.isValidEmail(email)) {
+      _showSnackBar('Please enter a valid email address', isError: true);
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     final error = await AuthService.login(email, password);
+    debugPrint('🔎 [SignIn] Login completed. error=$error');
 
     if (!mounted) return;
 
     if (error == null) {
-      // Login successful — check role and navigate
-      final userData = await AuthService.getUserData();
+      // Login successful — verify session, then check role and navigate.
+      final verifiedUserData = await AuthService.verify();
+      final userData = verifiedUserData ?? await AuthService.getUserData();
       final role = AuthService.roleFromUserData(userData);
+      final companyId = AuthService.extractCompanyId(userData);
+
+      debugPrint(
+          '🔎 [SignIn] Verify completed. verified=${verifiedUserData != null}');
+      debugPrint('🔎 [SignIn] Role="$role" companyId="$companyId"');
 
       if (!mounted) return;
 
-      // ── AC System Access Check for non-platform-admins ──
-      if (!AuthService.isPlatformAdminRole(role)) {
-        final companyId = AuthService.extractCompanyId(userData);
-        if (companyId != null && companyId.isNotEmpty) {
-          final hasAcAccess = await AuthService.checkAcSystemAccess(companyId);
-          if (!hasAcAccess) {
-            await AuthService.logout();
-            if (!mounted) return;
-            setState(() => _isLoading = false);
-            _showSnackBar(
-              'Use another login, this is an AC monitoring app so use another credential.',
-              isError: true,
-            );
-            return;
-          }
+      // ── AC System Access Check after verify ──
+      if (companyId != null && companyId.isNotEmpty) {
+        debugPrint(
+            '🔎 [SignIn] Calling check-ac-access for companyId=$companyId');
+        final hasAcAccess = await AuthService.checkAcSystemAccess(companyId);
+        debugPrint('🔎 [SignIn] check-ac-access result=$hasAcAccess');
+        if (!hasAcAccess) {
+          await AuthService.logout();
+          if (!mounted) return;
+          setState(() => _isLoading = false);
+          _showSnackBar(
+            'The current account is not authorized for this application. Please sign in with a valid account.',
+            isError: true,
+          );
+          return;
         }
+      } else {
+        debugPrint('⚠️ [SignIn] check-ac-access skipped: companyId missing');
       }
 
       setState(() => _isLoading = false);
 
       Widget destination;
       if (AuthService.isPlatformAdminRole(role)) {
-        final companyId = AuthService.extractCompanyId(userData);
         destination = PlatformAdminPage(companyId: companyId);
       } else if (AuthService.isCompanyAdminRole(role)) {
         destination = const CompanyAdminPage();
       } else {
-        final siteId = userData?['site']?.toString() ?? userData?['siteId']?.toString();
+        final siteId =
+            userData?['site']?.toString() ?? userData?['siteId']?.toString();
         if (siteId != null && siteId.isNotEmpty) {
           destination = const MainNavigationPage();
         } else {
           final companyId = AuthService.extractCompanyId(userData);
-          final companyName = AuthService.extractCompanyName(userData) ?? 'Company Dashboard';
+          final companyName =
+              AuthService.extractCompanyName(userData) ?? 'Company Dashboard';
           final bucket = AuthService.extractBucket(userData) ?? '';
           destination = CompanySitesPage(
             companyId: companyId ?? '',

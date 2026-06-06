@@ -31,15 +31,23 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
   Color get _bgColor => Theme.of(context).scaffoldBackgroundColor;
   // Color get _cardColor => Theme.of(context).cardColor;
   // Color get _cardColor => Theme.of(context).cardColor;
-  Color get _cardColor => _isDarkTheme ? const Color(0xFF2A244D) : const Color.fromARGB(255, 249, 249, 248);
-  Color get _textColor => _isDarkTheme ? Colors.white : Colors.white ;
-  Color get _textbody => _isDarkTheme ? Colors.white : Color.fromARGB(223, 74, 137, 8) ;
-  Color get _textSecondaryColor => _isDarkTheme ? Colors.white70 : Colors.white70;
-  Color get _textMutedColor => _isDarkTheme ? Colors.white38 : const Color(0xFF8A9EAD);
-  Color get _appBarIconColor => _isDarkTheme ? Colors.white : const Color(0xFF1B172E);
+  Color get _cardColor =>
+      _isDarkTheme ? const Color(0xFF2A244D) : const Color(0xFFF8FCF3);
+  Color get _textColor => _isDarkTheme ? Colors.white : const Color(0xFF1B172E);
+  Color get _textbody => _isDarkTheme ? Colors.white : const Color(0xFF4A8908);
+  Color get _textSecondaryColor =>
+      _isDarkTheme ? Colors.white70 : const Color(0xFF52616B);
+  Color get _textMutedColor =>
+      _isDarkTheme ? Colors.white38 : const Color(0xFF8A9EAD);
+  Color get _appBarIconColor =>
+      _isDarkTheme ? Colors.white : const Color(0xFF1B172E);
+  Color get _appBarTextColor => Colors.white;
   Color get _dialogBgColor => Theme.of(context).cardColor;
-  Color get _dividerColor => _isDarkTheme ? Colors.white12 : Colors.black12;
-  Color get _shadowColor => _isDarkTheme ? Colors.black26 : Colors.black.withValues(alpha: 0.05);
+  Color get _dividerColor =>
+      _isDarkTheme ? Colors.white12 : const Color(0xFFD8E6CE);
+  Color get _shadowColor => _isDarkTheme
+      ? Colors.black26
+      : const Color(0xFF6CC042).withValues(alpha: 0.10);
 
   void _showThemePreferencesDialog() {
     showDialog(
@@ -47,7 +55,8 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           backgroundColor: _dialogBgColor,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Text(
             'Theme Preferences',
             style: GoogleFonts.poppins(
@@ -75,7 +84,8 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                     setDialogState(() {
                       _isDarkTheme = val;
                     });
-                    Provider.of<ThemeProvider>(context, listen: false).setDarkMode(val);
+                    Provider.of<ThemeProvider>(context, listen: false)
+                        .setDarkMode(val);
                   }
                 },
               ),
@@ -96,7 +106,8 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                     setDialogState(() {
                       _isDarkTheme = val;
                     });
-                    Provider.of<ThemeProvider>(context, listen: false).setDarkMode(val);
+                    Provider.of<ThemeProvider>(context, listen: false)
+                        .setDarkMode(val);
                   }
                 },
               ),
@@ -107,7 +118,8 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
               onPressed: () => Navigator.pop(context),
               child: Text(
                 'Close',
-                style: GoogleFonts.poppins(color: AppColors.button, fontWeight: FontWeight.bold),
+                style: GoogleFonts.poppins(
+                    color: AppColors.button, fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -303,8 +315,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
       return;
     }
 
-    double minLat = positions.first.latitude,
-        maxLat = positions.first.latitude;
+    double minLat = positions.first.latitude, maxLat = positions.first.latitude;
     double minLng = positions.first.longitude,
         maxLng = positions.first.longitude;
     for (final pos in positions) {
@@ -1260,7 +1271,8 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
       prefixIcon: Icon(icon, color: _textSecondaryColor, size: 18),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       filled: true,
-      fillColor: _isDarkTheme ? Colors.black12 : Colors.black.withValues(alpha: 0.05),
+      fillColor:
+          _isDarkTheme ? Colors.black12 : Colors.black.withValues(alpha: 0.05),
       border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
     );
@@ -1320,16 +1332,16 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
     return Scaffold(
       backgroundColor: _bgColor,
       appBar: AppBar(
-        
-        // backgroundColor: Colors.transparent,
-         backgroundColor: _isDarkTheme ? const Color(0xFF2A244D) : const Color.fromARGB(223, 74, 137, 8),
+        backgroundColor: _isDarkTheme
+            ? const Color(0xFF2A244D)
+            : const Color.fromARGB(223, 74, 137, 8),
         elevation: 0,
         leading: Container(
           margin: const EdgeInsets.only(left: 16),
           alignment: Alignment.center,
           child: Icon(
             Icons.gpp_good_outlined,
-            color: _isDarkTheme ? Color(0xFF6CC042) : Colors.white,
+            color: _isDarkTheme ? const Color(0xFF6CC042) : Colors.white,
             size: 28,
           ),
         ),
@@ -1337,7 +1349,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
         title: Text(
           'Platform Admin',
           style: GoogleFonts.poppins(
-            color: _textColor,
+            color: _appBarTextColor,
             fontWeight: FontWeight.bold,
             fontSize: 18,
           ),
@@ -1359,8 +1371,12 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                 child: Row(
                   children: [
                     Icon(
-                      _isDarkTheme ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                      color: _isDarkTheme ? Colors.orangeAccent : const Color(0xFF1B172E),
+                      _isDarkTheme
+                          ? Icons.light_mode_rounded
+                          : Icons.dark_mode_rounded,
+                      color: _isDarkTheme
+                          ? Colors.orangeAccent
+                          : const Color(0xFF1B172E),
                       size: 18,
                     ),
                     const SizedBox(width: 8),
@@ -1389,13 +1405,13 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
         bottom: TabBar(
           controller: _tabController,
           indicator: UnderlineTabIndicator(
-  borderSide: BorderSide(
-    color: _isDarkTheme
-        ? const Color(0xFF6CC042)
-        : const Color(0xFF242038),
-    width: 3,
-  ),
-),
+            borderSide: BorderSide(
+              color: _isDarkTheme
+                  ? const Color(0xFF6CC042)
+                  : const Color(0xFF242038),
+              width: 3,
+            ),
+          ),
           labelColor: _isDarkTheme ? AppColors.button : const Color(0xFF1B172E),
           unselectedLabelColor: _textSecondaryColor,
           labelStyle:
@@ -1500,8 +1516,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                         position: pos,
                         infoWindow: InfoWindow(
                           title: c.name,
-                          snippet:
-                              '${c.city ?? ''}, ${c.state ?? ''}'.trim(),
+                          snippet: '${c.city ?? ''}, ${c.state ?? ''}'.trim(),
                         ),
                       ));
                     }
@@ -1708,16 +1723,11 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
         Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [
-                _cardColor,
-                _cardColor.withValues(alpha: 0.8)
-              ],
+              colors: [_cardColor, _cardColor.withValues(alpha: 0.8)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            border: Border(
-                bottom: BorderSide(
-                    color: _dividerColor, width: 1)),
+            border: Border(bottom: BorderSide(color: _dividerColor, width: 1)),
           ),
           padding: const EdgeInsets.all(16.0),
           child: Column(
@@ -1729,14 +1739,15 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                     child: Container(
                       height: 48,
                       decoration: BoxDecoration(
-                        color: _isDarkTheme 
-                            ? Colors.black.withValues(alpha: 0.2) 
+                        color: _isDarkTheme
+                            ? Colors.black.withValues(alpha: 0.2)
                             : Colors.black.withValues(alpha: 0.03),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                            color: _isDarkTheme 
-                                ? AppColors.button.withValues(alpha: 0.2) 
-                                : const Color(0xFF1B172E).withValues(alpha: 0.1),
+                            color: _isDarkTheme
+                                ? AppColors.button.withValues(alpha: 0.2)
+                                : const Color(0xFF1B172E)
+                                    .withValues(alpha: 0.1),
                             width: 1),
                       ),
                       child: TextField(
@@ -1839,11 +1850,11 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                       child: Container(
                         margin: const EdgeInsets.all(16.0),
                         decoration: BoxDecoration(
-                          color: _isDarkTheme ? const Color(0xFF131127) : const Color(0xFFF8FAFC),
+                          color: _isDarkTheme
+                              ? const Color(0xFF131127)
+                              : Colors.white,
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                              color: _dividerColor,
-                              width: 1),
+                          border: Border.all(color: _dividerColor, width: 1),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1853,7 +1864,9 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 16, vertical: 16),
                               decoration: BoxDecoration(
-                                color: _isDarkTheme ? const Color(0xFF1A172E) : const Color(0xFFEDF2F7),
+                                color: _isDarkTheme
+                                    ? const Color(0xFF1A172E)
+                                    : const Color(0xFFEFF7E9),
                                 borderRadius: const BorderRadius.vertical(
                                     top: Radius.circular(16)),
                               ),
@@ -1925,8 +1938,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                       ? null
                                       : Border(
                                           bottom: BorderSide(
-                                              color: _dividerColor,
-                                              width: 1)),
+                                              color: _dividerColor, width: 1)),
                                 ),
                                 child: Row(
                                   children: [
@@ -2022,16 +2034,11 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
         Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [
-                _cardColor,
-                _cardColor.withValues(alpha: 0.8)
-              ],
+              colors: [_cardColor, _cardColor.withValues(alpha: 0.8)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            border: Border(
-                bottom: BorderSide(
-                    color: _dividerColor, width: 1)),
+            border: Border(bottom: BorderSide(color: _dividerColor, width: 1)),
           ),
           padding: const EdgeInsets.all(16.0),
           child: Column(
@@ -2043,14 +2050,15 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                     child: Container(
                       height: 48,
                       decoration: BoxDecoration(
-                        color: _isDarkTheme 
-                            ? Colors.black.withValues(alpha: 0.2) 
+                        color: _isDarkTheme
+                            ? Colors.black.withValues(alpha: 0.2)
                             : Colors.black.withValues(alpha: 0.03),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                            color: _isDarkTheme 
-                                ? AppColors.button.withValues(alpha: 0.2) 
-                                : const Color(0xFF1B172E).withValues(alpha: 0.1),
+                            color: _isDarkTheme
+                                ? AppColors.button.withValues(alpha: 0.2)
+                                : const Color(0xFF1B172E)
+                                    .withValues(alpha: 0.1),
                             width: 1),
                       ),
                       child: TextField(
@@ -2153,11 +2161,11 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                       child: Container(
                         margin: const EdgeInsets.all(16.0),
                         decoration: BoxDecoration(
-                          color: _isDarkTheme ? const Color(0xFF131127) : const Color(0xFFF8FAFC),
+                          color: _isDarkTheme
+                              ? const Color(0xFF131127)
+                              : Colors.white,
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                              color: _dividerColor,
-                              width: 1),
+                          border: Border.all(color: _dividerColor, width: 1),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2167,7 +2175,9 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 16, vertical: 16),
                               decoration: BoxDecoration(
-                                color: _isDarkTheme ? const Color(0xFF1A172E) : const Color(0xFFEDF2F7),
+                                color: _isDarkTheme
+                                    ? const Color(0xFF1A172E)
+                                    : const Color(0xFFEFF7E9),
                                 borderRadius: const BorderRadius.vertical(
                                     top: Radius.circular(16)),
                               ),
@@ -2232,8 +2242,7 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
                                       ? null
                                       : Border(
                                           bottom: BorderSide(
-                                              color: _dividerColor,
-                                              width: 1)),
+                                              color: _dividerColor, width: 1)),
                                 ),
                                 child: Row(
                                   children: [
@@ -2332,12 +2341,14 @@ class _PlatformAdminPageState extends State<PlatformAdminPage>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: _isDarkTheme ? Colors.white12 : Colors.black12, size: 48),
+            Icon(icon,
+                color: _isDarkTheme ? Colors.white12 : Colors.black12,
+                size: 48),
             const SizedBox(height: 16),
             Text(msg,
                 textAlign: TextAlign.center,
-                style:
-                    GoogleFonts.poppins(color: _textSecondaryColor, fontSize: 13)),
+                style: GoogleFonts.poppins(
+                    color: _textSecondaryColor, fontSize: 13)),
           ],
         ),
       ),

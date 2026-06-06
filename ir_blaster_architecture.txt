@@ -1,0 +1,764 @@
+IR BLASTER SYSTEM ARCHITECTURE
+==============================
+
+Project: IR Blaster / AC Controller
+Purpose: Control AC/TV/other IR appliances from mobile app and cloud using MQTT.
+App stack: Flutter mobile app, backend APIs, backend database, MQTT client, Bluetooth Serial, Wi-Fi scan, HTTP APIs, secure storage.
+
+
+1. HIGH LEVEL ARCHITECTURE
+--------------------------
+
+[Mobile App - Flutter]
+        |
+        | 1) Login / user / site / device data
+        v
+[Backend APIs + Backend Database]
+        |
+        | 2) Command publish / status subscribe
+        v
+[MQTT Broker]
+        |
+        | 3) MQTT over Wi-Fi
+        v
+[ESP32 IR Blaster Device]
+        |
+        | 4) 38 kHz IR signal
+        v
+[AC / TV / Appliance]
+
+Optional local setup path:
+[Mobile App] --Bluetooth Serial / Wi-Fi setup--> [ESP32] --Wi-Fi--> [MQTT Broker]
+
+
+2. HARDWARE ARCHITECTURE
+------------------------
+
+Recommended hardware:
+- MCU: ESP32 / ESP32-S3
+- Connectivity: Wi-Fi 2.4 GHz, optional Bluetooth Classic/BLE for provisioning
+- IR transmit: IR LED driven through NPN transistor or MOSFET
+- IR carrier: usually 38 kHz for AC/TV remote protocols
+- IR receive: TSOP/VS1838B IR receiver module for learning remote commands
+- Power: 5V USB adapter, onboard 3.3V regulator for ESP32
+- Optional sensors: temperature/humidity sensor, current sensor, status LED, reset button
+
+IR transmit circuit:
+- ESP32 GPIO -> resistor -> transistor/MOSFET gate/base
+- IR LED connected through current limiting resistor
+- Use transistor driver because ESP32 GPIO cannot safely drive high IR LED current directly
+
+IR receive circuit:
+- IR receiver VCC -> 3.3V or 5V depending on module
+- GND -> common ground
+- OUT -> ESP32 GPIO interrupt pin
+
+
+3. DEVICE FIRMWARE ARCHITECTURE
+-------------------------------
+
+ESP32 firmware modules:
+- Wi-Fi manager: stores SSID/password and reconnects automatically
+- MQTT client: connects to broker, subscribes to command topics, publishes status
+- IR transmitter: converts command payload into IR protocol/raw pulse data
+- IR receiver/learner: captures IR pulses from physical remote and stores/sends learned code
+- Device state manager: online/offline, last command, AC mode, temperature, fan speed
+- OTA updater: optional firmware update from cloud
+- Local config store: NVS/EEPROM for Wi-Fi, device ID, site ID, MQTT credentials
+
+Recommended firmware libraries:
+- Arduino ESP32 or ESP-IDF
+- PubSubClient / AsyncMqttClient for MQTT
+- IRremoteESP8266 for IR send and receive
+- ArduinoJson for JSON payloads
+- WiFiManager or custom BLE/Bluetooth provisioning
+
+
+4. MOBILE APP ARCHITECTURE
+--------------------------
+
+Current project direction:
+- Flutter app
+- Backend API for login, users, companies, sites, rooms, and devices
+- Backend database for user/company/site/device records and command history
+- mqtt_client package for MQTT command/status communication
+- flutter_bluetooth_serial for initial ESP32 setup
+- wifi_scan for Wi-Fi network selection
+- flutter_secure_storage/shared_preferences for local session/config
+
+Mobile app responsibilities:
+- User login and role-based access
+- Show sites, rooms, devices, and AC controls
+- Provision device using Bluetooth/Wi-Fi setup
+- Publish commands to MQTT control topic
+- Subscribe to status topic for acknowledgement and live device state
+- Store command history and schedules in backend/cloud
+
+
+5. CLOUD ARCHITECTURE
+---------------------
+
+Cloud components:
+- Backend API: login, user authentication, provisioning, equipment, admin logic, validation, reporting
+- Backend database: user profile, company, site, room, device metadata, command history
+- MQTT Broker: real-time device command and status transport
+- Optional cloud function / worker: receives app/API commands and publishes to MQTT
+
+Broker options:
+- Mosquitto on VM/server
+- EMQX
+- HiveMQ
+- AWS IoT Core / Azure IoT Hub if enterprise scale is needed
+
+Security recommendation:
+- Use MQTT over TLS, port 8883, in production
+- Use unique username/password or certificate per device
+- Use ACL so each device can only access its own topics
+- Never share one global device password across all devices in production
+
+
+6. MQTT TOPIC ARCHITECTURE
+--------------------------
+
+Current project config uses this style:
+- Control topic: testir/sustainabyte_demo/control
+- Schedule topic: testir/sustainabyte_demo/schedule
+- Status topic: testir/sustainabyte_demo/status
+- General topic: sustainabyte_demo
+
+Recommended scalable topic format:
+
+Command to one device:
+ir/{companyId}/{siteId}/{deviceId}/cmd
+
+Device acknowledgement/status:
+ir/{companyId}/{siteId}/{deviceId}/status
+
+Device telemetry:
+ir/{companyId}/{siteId}/{deviceId}/telemetry
+
+Schedule update:
+ir/{companyId}/{siteId}/{deviceId}/schedule
+
+IR learning result:
+ir/{companyId}/{siteId}/{deviceId}/learn/result
+
+Device online/offline last will:
+ir/{companyId}/{siteId}/{deviceId}/lwt
+
+Example:
+ir/company_001/site_002/esp32_ac_01/cmd
+ir/company_001/site_002/esp32_ac_01/status
+
+
+7. COMMAND SEND FLOW
+--------------------
+
+Example: User turns AC ON from mobile app.
+
+Step 1: User taps ON in Flutter app.
+Step 2: App checks login/user/device permission from backend API.
+Step 3: App creates MQTT command payload.
+Step 4: App publishes to device command topic.
+Step 5: ESP32 is subscribed to command topic and receives the message.
+Step 6: ESP32 validates commandId/deviceId.
+Step 7: ESP32 converts command into IR code.
+Step 8: ESP32 sends IR signal through IR LED.
+Step 9: ESP32 publishes acknowledgement/status to status topic.
+Step 10: App receives status and updates UI.
+
+Example command payload:
+{
+  "commandId": "cmd_20260606_001",
+  "deviceId": "esp32_ac_01",
+  "type": "AC_CONTROL",
+  "power": "ON",
+  "mode": "COOL",
+  "temperature": 24,
+  "fan": "AUTO",
+  "swing": "ON",
+  "timestamp": 1780747200000
+}
+
+Example acknowledgement payload:
+{
+  "commandId": "cmd_20260606_001",
+  "deviceId": "esp32_ac_01",
+  "status": "EXECUTED",
+  "power": "ON",
+  "mode": "COOL",
+  "temperature": 24,
+  "rssi": -58,
+  "timestamp": 1780747200350
+}
+
+
+8. COMMAND RECEIVE / IR LEARNING FLOW
+-------------------------------------
+
+Example: User wants to learn a new remote command.
+
+Step 1: App sends LEARN_START command using MQTT.
+Step 2: ESP32 enables IR receiver for a fixed time window, for example 10 seconds.
+Step 3: User points physical remote at IR receiver and presses button.
+Step 4: ESP32 captures protocol/raw pulse data.
+Step 5: ESP32 publishes learned code to learn/result topic.
+Step 6: App/backend stores the IR code against brand/model/button.
+Step 7: Later, app can send that stored code back to ESP32 for transmission.
+
+Example learned code payload:
+{
+  "deviceId": "esp32_ac_01",
+  "button": "POWER_ON",
+  "protocol": "DAIKIN",
+  "bits": 280,
+  "rawLength": 280,
+  "rawData": [3500, 1750, 450, 1300],
+  "timestamp": 1780747210000
+}
+
+
+9. TIMING / LATENCY ESTIMATES
+-----------------------------
+
+Typical command time from app tap to IR signal:
+- App payload creation: 5 to 20 ms
+- MQTT publish to broker: 20 to 100 ms on good internet
+- Broker to ESP32: 20 to 150 ms
+- ESP32 processing: 5 to 30 ms
+- IR transmission: 100 to 800 ms depending on protocol
+- ESP32 acknowledgement to app: 40 to 250 ms
+
+Expected total:
+- Best case: 150 to 300 ms
+- Normal case: 300 ms to 1 second
+- Slow network case: 1 to 3 seconds
+- IR learning window: usually 5 to 10 seconds because it waits for the user to press remote button
+
+Important note:
+AC IR commands often take longer than TV commands because AC protocols send a full state frame: power, mode, temperature, fan, swing, timer, etc.
+
+
+10. MQTT DATA RATE / MESSAGES PER SECOND
+----------------------------------------
+
+For normal IR blaster usage, MQTT traffic is very low.
+
+Per device normal case:
+- Keepalive ping: every 30 to 60 seconds
+- Status heartbeat: every 30 to 60 seconds
+- Command messages: only when user/schedule sends command
+- Telemetry: every 10 to 60 seconds if sensor data is enabled
+
+Typical per-device message rate:
+- Idle device: 0.02 to 0.1 messages/second
+- Normal active device: 0.1 to 1 message/second
+- Busy testing/provisioning: 1 to 5 messages/second
+- IR learning raw upload: short burst, maybe 1 to 3 larger messages
+
+Example for 1 device:
+- 1 heartbeat every 30 seconds = 0.033 msg/sec
+- 1 command + 1 acknowledgement during control = 2 messages per action
+- If user sends 10 commands in 1 minute = 20 MQTT messages/minute = 0.33 msg/sec
+
+Example for 1000 devices:
+- Heartbeat every 60 seconds = about 16.7 messages/second
+- Telemetry every 30 seconds = about 33.3 messages/second
+- 100 users sending commands at same time = short burst of about 200 messages
+
+Payload size estimate:
+- Simple command JSON: 150 to 500 bytes
+- Status JSON: 150 to 600 bytes
+- Telemetry JSON: 100 to 400 bytes
+- Raw learned IR data: 1 KB to 10 KB depending on protocol/raw array size
+
+Bandwidth estimate:
+- 1000 devices with 30-second telemetry at 300 bytes each = about 10 KB/sec payload, plus MQTT/TCP overhead
+- This is small for a normal MQTT broker
+
+Recommended MQTT QoS:
+- QoS 0: telemetry where occasional loss is acceptable
+- QoS 1: commands and acknowledgements
+- QoS 2: usually not required; adds overhead and delay
+
+Recommended keepalive:
+- 30 to 60 seconds for ESP32 devices
+
+
+11. SCHEDULING FLOW
+-------------------
+
+Option A - Cloud controlled schedule:
+- Schedule stored in backend database
+- Cloud worker publishes command at scheduled time
+- ESP32 only receives normal command
+- Best when schedules must work across many devices and need cloud audit/history
+
+Option B - Device stored schedule:
+- App/backend publishes schedule topic
+- ESP32 stores schedule locally
+- ESP32 executes even if internet is temporarily unavailable
+- Best when reliability during network outage is important
+
+Recommended approach:
+- Use both: store master schedule in cloud and sync next active schedules to ESP32.
+
+
+12. DATABASE / CLOUD DATA MODEL
+-------------------------------
+
+Suggested collections/tables:
+- users
+- companies
+- sites
+- rooms
+- devices
+- deviceStatus
+- commandHistory
+- schedules
+- irCodeLibrary
+- learnedIrCodes
+
+Device fields:
+- deviceId
+- companyId
+- siteId
+- roomId
+- macAddress
+- firmwareVersion
+- mqttTopicBase
+- onlineStatus
+- lastSeenAt
+- lastCommandAt
+- currentState
+
+Command history fields:
+- commandId
+- userId
+- deviceId
+- commandPayload
+- requestedAt
+- deliveredAt
+- executedAt
+- result: PENDING / DELIVERED / EXECUTED / FAILED
+
+
+13. ERROR HANDLING
+------------------
+
+Important cases:
+- Device offline: app shows offline and stores command as failed/pending
+- MQTT disconnected: app retries or shows connection issue
+- Command not acknowledged: mark timeout after 3 to 5 seconds
+- IR sent but appliance did not respond: hard to confirm without sensor feedback
+- Duplicate command received: ESP32 ignores duplicate commandId
+- Wi-Fi lost: ESP32 publishes offline via MQTT Last Will when broker detects disconnect
+
+Recommended command timeout:
+- App waits 3 seconds for acknowledgement
+- If no acknowledgement, show command pending/failed
+- ESP32 should publish status immediately after IR send
+
+
+14. TECH STACK SUMMARY
+----------------------
+
+Mobile:
+- Flutter / Dart
+- mqtt_client
+- Backend login/API integration
+- Backend database integration through APIs
+- Bluetooth Serial for ESP32 provisioning
+- Wi-Fi scan for setup
+- Secure storage / shared preferences
+
+Firmware:
+- ESP32
+- Arduino ESP32 or ESP-IDF
+- MQTT library: PubSubClient / AsyncMqttClient
+- IR library: IRremoteESP8266
+- JSON: ArduinoJson
+
+Cloud:
+- MQTT broker: Mosquitto / EMQX / HiveMQ / AWS IoT / Azure IoT
+- Backend APIs for login/provisioning/admin/reporting
+- Backend database for users/devices/schedules/history
+- Optional worker/cloud functions for schedule execution
+
+Infrastructure:
+- TLS certificates for MQTT production
+- Device credentials/ACL
+- Logging and monitoring
+- OTA firmware update storage
+
+
+15. RECOMMENDED PRODUCTION DESIGN
+---------------------------------
+
+Use this final design:
+- Flutter app logs in through backend API
+- Backend database stores companies, sites, rooms, devices, schedules, and history
+- ESP32 connects to Wi-Fi and MQTT broker
+- App or backend publishes commands with QoS 1
+- ESP32 subscribes to its own command topic only
+- ESP32 sends IR command and publishes acknowledgement
+- App subscribes to status topic and updates UI
+- Device sends heartbeat every 30 to 60 seconds
+- MQTT TLS and unique credentials are used in production
+
+
+16. SIMPLE SEQUENCE DIAGRAM
+---------------------------
+
+Mobile App        Backend/Cloud         MQTT Broker        ESP32 IR Device        AC/TV
+   |                   |                    |                    |                |
+   | Login/check user  |                    |                    |                |
+   |------------------>|                    |                    |                |
+   | Device allowed    |                    |                    |                |
+   |<------------------|                    |                    |                |
+   | Publish command                        |                    |                |
+   |--------------------------------------->|                    |                |
+   |                                        | Deliver command    |                |
+   |                                        |------------------->|                |
+   |                                        |                    | Send IR signal |
+   |                                        |                    |--------------->|
+   |                                        | Status ack         |                |
+   |                                        |<-------------------|                |
+   | Receive status                         |                    |                |
+   |<---------------------------------------|                    |                |
+
+
+17. FINAL NOTES
+---------------
+
+- MQTT is used because it is fast, lightweight, and good for IoT devices.
+- Backend/cloud database is used for users, permissions, sites, devices, history, and schedules.
+- ESP32 is the bridge between cloud commands and physical IR signals.
+- IR transmit does not naturally confirm whether the AC actually changed state. For true confirmation, add a temperature sensor, current sensor, or appliance feedback integration.
+- Normal user command response should feel almost instant: usually below 1 second.
+
+
+18. APPLICATION FLOW
+--------------------
+
+The mobile application flow should be simple for the user and reliable for the device.
+
+Main user flow:
+
+1. Splash screen
+   - App starts.
+   - Backend/API and app configuration are loaded.
+   - App checks whether the user is already logged in.
+
+2. Login screen
+   - User enters email/mobile and password.
+   - Backend API validates the user.
+   - App loads user role, company, sites, rooms, and device access.
+
+3. Dashboard / Home screen
+   - User sees assigned sites or buildings.
+   - User can see online/offline device count.
+   - User can quickly see AC status, current temperature, running mode, and alerts.
+
+4. Site selection
+   - User selects company/site/building.
+   - App loads rooms/floors/devices mapped to that site.
+
+5. Room or device list
+   - User selects a room.
+   - App shows IR blaster devices inside that room.
+   - Each device card shows:
+     - Device name
+     - Online/offline status
+     - Last seen time
+     - Current power state
+     - Current AC temperature/mode if available
+
+6. Device detail / control screen
+   - User opens one IR blaster.
+   - App subscribes to the device status MQTT topic.
+   - App shows current state and control buttons.
+   - User can send AC/TV commands.
+
+7. Command execution
+   - User taps a control, for example Power ON.
+   - App creates command payload with commandId.
+   - App publishes MQTT message to control topic.
+   - ESP32 receives command and sends IR signal.
+   - ESP32 publishes acknowledgement/status.
+   - App updates UI from Pending to Success/Failed.
+
+8. History screen
+   - App shows previous commands.
+   - History includes user, device, command, time, and result.
+
+9. Schedule screen
+   - User creates schedule, for example AC ON at 9:00 AM and OFF at 6:00 PM.
+   - Schedule is stored in cloud.
+   - Schedule can also be synced to ESP32 for offline execution.
+
+10. Device setup / provisioning flow
+    - User selects Add Device.
+    - App scans/connects using Bluetooth Serial or BLE.
+    - User selects Wi-Fi SSID and enters Wi-Fi password.
+    - App sends Wi-Fi and device configuration to ESP32.
+    - ESP32 connects to Wi-Fi and MQTT broker.
+    - ESP32 publishes online status.
+    - App maps device to company/site/room.
+
+11. IR learning flow
+    - User selects Learn Remote.
+    - App sends LEARN_START command to ESP32.
+    - User presses button on original remote.
+    - ESP32 captures IR code.
+    - App stores learned command as a named button.
+    - Later user can use that learned button from the app.
+
+
+19. WHAT USER CAN CONTROL FROM APPLICATION
+------------------------------------------
+
+For AC control:
+
+- Power ON/OFF
+- Temperature increase/decrease
+- Set temperature, for example 16 to 30 degree Celsius
+- Mode selection:
+  - Cool
+  - Heat
+  - Dry
+  - Fan
+  - Auto
+- Fan speed:
+  - Low
+  - Medium
+  - High
+  - Auto
+- Swing ON/OFF
+- Turbo mode ON/OFF if supported by AC remote protocol
+- Sleep mode ON/OFF if supported
+- Timer ON/OFF if supported
+- Preset scenes, for example:
+  - Comfort mode
+  - Energy saving mode
+  - Night mode
+
+For TV or other IR appliances:
+
+- Power ON/OFF
+- Volume up/down
+- Channel up/down
+- Mute
+- Source/input selection
+- Custom learned remote buttons
+
+For device management:
+
+- Add IR blaster
+- Rename device
+- Assign device to room/site
+- View online/offline status
+- View last seen time
+- View firmware version
+- Restart device command if supported
+- Update device configuration
+- Remove device from account/site
+
+For schedules and automation:
+
+- Create ON/OFF schedule
+- Create repeated schedule by day/week
+- Create temperature schedule for AC
+- Enable/disable schedule
+- Edit/delete schedule
+- Run command based on time
+- Optional: run command based on room temperature or occupancy if sensors are added
+
+For monitoring:
+
+- View command success/failure
+- View device heartbeat
+- View MQTT connection status
+- View command history
+- View energy-saving operation history if sensors/integration are added
+
+
+20. APPLICATION SCREEN ARCHITECTURE
+-----------------------------------
+
+Recommended screens:
+
+1. Splash screen
+2. Login screen
+3. Dashboard screen
+4. Company/site selection screen
+5. Room list screen
+6. Device list screen
+7. Device detail/control screen
+8. Schedule screen
+9. Command history screen
+10. Add device/provisioning screen
+11. Wi-Fi setup screen
+12. IR learning screen
+13. Admin/user management screen
+14. Settings screen
+
+Recommended navigation:
+
+Bottom navigation:
+- Dashboard
+- Devices
+- Schedules
+- History
+- Settings
+
+Inside Devices:
+- Site -> Room -> Device -> Control
+
+
+21. APPLICATION CONTROL FLOW DIAGRAM
+------------------------------------
+
+User opens app
+     |
+     v
+Login / session check
+     |
+     v
+Load user role, company, sites, rooms, devices
+     |
+     v
+Dashboard
+     |
+     v
+Select site / room / device
+     |
+     v
+Device control screen
+     |
+     v
+User taps command
+     |
+     v
+App publishes MQTT command
+     |
+     v
+ESP32 receives command
+     |
+     v
+ESP32 sends IR signal
+     |
+     v
+Appliance receives IR command
+     |
+     v
+ESP32 sends status acknowledgement
+     |
+     v
+App updates UI and saves history
+
+
+22. CONTROL BUTTON TO MQTT PAYLOAD MAPPING
+------------------------------------------
+
+Power ON button:
+{
+  "commandId": "unique_command_id",
+  "type": "AC_CONTROL",
+  "power": "ON"
+}
+
+Set temperature button:
+{
+  "commandId": "unique_command_id",
+  "type": "AC_CONTROL",
+  "power": "ON",
+  "temperature": 24
+}
+
+Mode change button:
+{
+  "commandId": "unique_command_id",
+  "type": "AC_CONTROL",
+  "mode": "COOL",
+  "temperature": 24,
+  "fan": "AUTO"
+}
+
+Fan speed button:
+{
+  "commandId": "unique_command_id",
+  "type": "AC_CONTROL",
+  "fan": "HIGH"
+}
+
+Learn remote button:
+{
+  "commandId": "unique_command_id",
+  "type": "LEARN_START",
+  "buttonName": "POWER_ON",
+  "timeoutSeconds": 10
+}
+
+
+23. APP UI STATUS STATES
+------------------------
+
+Each command should show one of these states:
+
+- Ready: device is online and command can be sent
+- Sending: app published command to MQTT
+- Pending: waiting for ESP32 acknowledgement
+- Success: ESP32 sent IR and replied EXECUTED
+- Failed: ESP32 replied failed or app timeout happened
+- Offline: device is not connected to MQTT
+
+Recommended timeout:
+- Show Pending immediately after button press.
+- Wait up to 3 seconds for acknowledgement.
+- If acknowledgement comes, show Success.
+- If no acknowledgement after 3 seconds, show Failed or Retry.
+
+
+24. ROLE BASED APPLICATION ACCESS
+---------------------------------
+
+Platform admin:
+- Manage all companies, sites, users, and devices.
+
+Company admin:
+- Manage company sites, rooms, users, and assigned devices.
+
+Site admin:
+- Manage devices and schedules for one site.
+
+Normal user:
+- Control assigned devices.
+- View schedule/history if permission is given.
+
+Technician:
+- Add/provision devices.
+- Test MQTT and IR send/receive.
+- Learn remote commands.
+
+
+25. PRACTICAL APP CONTROL EXPERIENCE
+------------------------------------
+
+When user controls AC from app:
+
+- Button press should update UI immediately to Pending.
+- App should not wait silently.
+- Most commands should complete in less than 1 second.
+- User should see clear device online/offline state.
+- If device is offline, app should not send command blindly.
+- App should save command history for audit.
+- App should prevent duplicate rapid clicks by disabling the same button for 1 to 2 seconds.
+- App should show last known AC state, but mention that IR control may not guarantee true appliance state unless feedback sensor is available.
+
+Best user experience:
+- Use large ON/OFF button.
+- Use plus/minus buttons for temperature.
+- Use segmented controls or dropdown for mode and fan.
+- Use schedule screen for repeated commands.
+- Use history screen for admin tracking.

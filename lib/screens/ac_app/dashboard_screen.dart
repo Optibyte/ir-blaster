@@ -91,8 +91,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final body = jsonDecode(response.body);
         if (body['status'] == 1) {
           // Also fetch systems to map systemId to Name
-          final systemsUrl =
-              '${AppConfig.provisionBaseUrl}/systems?companyId=$companyId&siteId=$siteId';
+          final hasCompanyId = companyId.isNotEmpty && companyId != 'null' && companyId != 'undefined';
+          final systemsUrl = hasCompanyId
+              ? '${AppConfig.provisionBaseUrl}/systems/$companyId?siteId=$siteId'
+              : '${AppConfig.provisionBaseUrl}/systems?companyId=$companyId&siteId=$siteId';
           final systemsResponse = await http.get(
             Uri.parse(systemsUrl),
             headers: {

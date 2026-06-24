@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:ir_blaster_ac/widgets/top_navbar.dart';
 import 'package:ir_blaster_ac/screens/ac_app/system_view.dart';
+import 'package:ir_blaster_ac/screens/ac_app/equipment_view.dart';
 import 'package:ir_blaster_ac/screens/ac_app/device_detail_page.dart';
 import 'package:ir_blaster_ac/screens/ac_app/ac_control_page.dart';
 import 'package:ir_blaster_ac/screens/ac_app/dashboard_screen.dart';
@@ -18,6 +19,7 @@ class _HomePageState extends State<HomePage> {
   int _currentIndex = 1; // Start on Dashboard (index 1)
   late final PageController _pageController;
   int _systemCount = 0;
+  int _equipmentCount = 0;
 
   @override
   void initState() {
@@ -44,12 +46,16 @@ class _HomePageState extends State<HomePage> {
             bottom: false,
             child: TopNavbar(
               showIcons: true,
-              hideBranding: _currentIndex == 2, // Only hide branding for Systems
-              title: _currentIndex == 2
+              hideBranding: _currentIndex == 2 || _currentIndex == 3, // Hide branding for Equipment & Systems
+              title: _currentIndex == 3
                   ? 'SYSTEMS VIEW'
-                  : (_currentIndex == 1 ? 'DASHBOARD' : 'VIEWS'),
+                  : (_currentIndex == 2
+                      ? 'EQUIPMENT VIEW'
+                      : (_currentIndex == 1 ? 'DASHBOARD' : 'VIEWS')),
               // subtitle: 'HVAC MONITORING',
-              totalCount: _currentIndex == 2 ? '$_systemCount' : null,
+              totalCount: _currentIndex == 3
+                  ? '$_systemCount'
+                  : (_currentIndex == 2 ? '$_equipmentCount' : null),
             ),
           ),
 
@@ -63,6 +69,23 @@ class _HomePageState extends State<HomePage> {
               },
               children: [
                 const DashboardScreen(),
+                EquipmentViewPage(
+                  onCountChanged: (count) =>
+                      setState(() => _equipmentCount = count),
+                  onEquipmentTap:
+                      (equipmentId, name, systemId, systemShortId) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => DeviceDetailPage(
+                          deviceName: name,
+                          systemId: systemId,
+                          systemShortId: systemShortId,
+                        ),
+                      ),
+                    );
+                  },
+                ),
                 SystemViewPage(
                   onCountChanged: (count) =>
                       setState(() => _systemCount = count),
@@ -129,6 +152,10 @@ class _HomePageState extends State<HomePage> {
             BottomNavigationBarItem(
               icon: Icon(Icons.dashboard_outlined),
               label: 'Dashboard',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.grid_view_rounded),
+              label: 'Equipment',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.layers_outlined),

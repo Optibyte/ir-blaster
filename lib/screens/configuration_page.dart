@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'bluetooth_scanner_page.dart';
+import 'main_navigation_page.dart';
 import 'widgets/ac_control_widget.dart';
 import 'widgets/temperature_widget.dart';
 import 'widgets/wifi_section_widget.dart';
@@ -195,6 +196,9 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         _sendCommand("GET_TIME");
         _sendCommand("GET_WIFI"); // Ask device for actual WiFi status
 
+        // Directly show wifi configure page if bluetooth is connected
+        _showWifiSetupDialog();
+
         // Timeout for initial sync
         Future.delayed(const Duration(seconds: 5), () {
           if (mounted && _wifiStatus.contains("Syncing")) {
@@ -348,6 +352,11 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   }
 
   void _recordDisconnect(String reason) {
+    if (_connection.isConnected) {
+      _log("BT event: $reason (still connected, ignoring disconnect)");
+      return;
+    }
+
     final time = DateFormat("yyyy-MM-dd HH:mm:ss").format(DateTime.now());
     setState(() {
       _isConnected = false;
@@ -356,7 +365,13 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       _lastDisconnectTime = time;
     });
     _log("BT disconnected: $reason @ $time");
-    _showReconnectDialog();
+
+    // Do not show the reconnect dialog if WiFi is successfully connected
+    if (!_isWifiConnected) {
+      _showReconnectDialog();
+    } else {
+      _log("WiFi is connected. Suppressing Bluetooth reconnect dialog.");
+    }
   }
 
   String _disconnectHint(String reason) {
@@ -442,6 +457,11 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       _showSnack("WiFi connected ✅", _green);
       // auto connect mqtt if values exist
       _sendMqttSettingsToDevice(connect: true);
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          _routeToSystemPage();
+        }
+      });
       return;
     }
     if (line.toLowerCase().contains("wifi_failed") ||
@@ -480,6 +500,13 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         if (isConn) _isConnectingWifi = false;
       });
       _saveWifiStatus(isConn, ip: ip);
+      if (isConn) {
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) {
+            _routeToSystemPage();
+          }
+        });
+      }
       return;
     }
 
@@ -511,6 +538,11 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         }
       });
       _saveWifiStatus(true, ip: _wifiIP);
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          _routeToSystemPage();
+        }
+      });
       return;
     }
 
@@ -1180,12 +1212,14 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
           children: [
             Icon(Icons.bluetooth_disabled, color: _red, size: 28),
             const SizedBox(width: 12),
-            const Text(
-              "Bluetooth Disconnected",
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
+            const Expanded(
+              child: Text(
+                "Bluetooth Disconnected",
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
               ),
             ),
           ],
@@ -1335,6 +1369,17 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const BluetoothScannerPage()),
+      (_) => false,
+    );
+  }
+
+  void _routeToSystemPage() {
+    if (_connection.isConnected) _connection.close();
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const MainNavigationPage(initialIndex: 1),
+      ),
       (_) => false,
     );
   }

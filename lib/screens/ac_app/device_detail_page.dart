@@ -181,28 +181,28 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     });
 
     // Efficient Watchdog: Periodically check if we haven't received a status JSON
-    // 10-13 seconds: analyzing/checking state (still online)
-    // > 13 seconds: confirmed offline/inactive
+    // 20-30 seconds: analyzing/checking state (still online)
+    // > 30 seconds: confirmed offline/inactive
     _statusWatchdogTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
         final elapsed = DateTime.now().difference(_lastMessageReceivedTime);
 
-        if (elapsed > const Duration(seconds: 13)) {
+        if (elapsed > const Duration(seconds: 30)) {
           if (_isOnline || _isAnalyzing) {
             setState(() {
               _isOnline = false;
               _isAnalyzing = false;
               _inactiveStartTime = DateTime.now();
               debugPrint(
-                  '⚠️ [Watchdog] No status JSON received for 13s. Setting WiFi to INACTIVE.');
+                  '⚠️ [Watchdog] No status JSON received for 30s. Setting WiFi to INACTIVE.');
             });
           }
-        } else if (elapsed > const Duration(seconds: 10)) {
+        } else if (elapsed > const Duration(seconds: 20)) {
           if (!_isAnalyzing) {
             setState(() {
               _isAnalyzing = true;
               debugPrint(
-                  '🔍 [Watchdog] No status JSON received for 10s. Setting WiFi to ANALYZING/CHECKING.');
+                  '🔍 [Watchdog] No status JSON received for 20s. Setting WiFi to ANALYZING/CHECKING.');
             });
           }
         } else {
@@ -511,9 +511,16 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     final bucket = await AuthService.getBucket() ?? '';
     final token = await AuthService.getCookieHeader() ?? '';
 
+    final queryParams = <String>[];
+    if (companyId.isNotEmpty && companyId != 'null' && companyId != 'undefined') {
+      queryParams.add('companyId=$companyId');
+    }
+    if (siteId.isNotEmpty && siteId != 'null' && siteId != 'undefined') {
+      queryParams.add('siteId=$siteId');
+    }
+    final queryString = queryParams.isNotEmpty ? '?${queryParams.join('&')}' : '';
     final url =
-        '${AppConfig.provisionBaseUrl}/systems/equipment/${widget.systemId}'
-        '?companyId=$companyId&siteId=$siteId&bucket=$bucket';
+        '${AppConfig.provisionBaseUrl}/equipments/ac/by-company$queryString';
 
     try {
       final response = await http.get(
@@ -528,60 +535,26 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         final data = jsonDecode(response.body);
         final dynamic listData = data['data'];
 
-        if (listData != null &&
-            listData is List &&
-            mounted &&
-            listData.isNotEmpty) {
-          final List<dynamic> equipmentList = listData;
-          _applyEquipmentData(equipmentList);
-          // Save to cache disabled to use only live data
-          // LocalCacheService.saveEquipmentList(widget.systemId, equipmentList);
-        } else if (mounted) {
-          if (widget.systemId == 'Sustainabyte_testir') {
-            _applyEquipmentData([
-              {
-                'name': 'TESTIR',
-                'equipmentId': 'Sustainabyte_testir',
-                'shortId': 'Sustainabyte_testir',
-                'imei': 'Sustainabyte_testir',
-                'equipmentTypeId': 'ac_compressor'
-              }
-            ]);
-          } else {
-            setState(() => _isLoadingEquipments = false);
+        if (listData != null && listData is List) {
+          final List<dynamic> filteredList = listData.where((e) {
+            final sysId = (e['systemId'] ?? e['SystemId'] ?? '').toString();
+            return sysId.toLowerCase() == widget.systemId.toLowerCase();
+          }).toList();
+
+          if (mounted && filteredList.isNotEmpty) {
+            _applyEquipmentData(filteredList);
+            return;
           }
         }
-      } else if (mounted) {
-        if (widget.systemId == 'Sustainabyte_testir') {
-          _applyEquipmentData([
-            {
-              'name': 'TESTIR',
-              'equipmentId': 'Sustainabyte_testir',
-              'shortId': 'Sustainabyte_testir',
-              'imei': 'Sustainabyte_testir',
-              'equipmentTypeId': 'ac_compressor'
-            }
-          ]);
-        } else {
-          setState(() => _isLoadingEquipments = false);
-        }
+      }
+
+      if (mounted) {
+        setState(() => _isLoadingEquipments = false);
       }
     } catch (e) {
       debugPrint('Error fetching equipments: $e');
       if (mounted) {
-        if (widget.systemId == 'Sustainabyte_testir') {
-          _applyEquipmentData([
-            {
-              'name': 'TESTIR',
-              'equipmentId': 'Sustainabyte_testir',
-              'shortId': 'Sustainabyte_testir',
-              'imei': 'Sustainabyte_testir',
-              'equipmentTypeId': 'ac_compressor'
-            }
-          ]);
-        } else {
-          setState(() => _isLoadingEquipments = false);
-        }
+        setState(() => _isLoadingEquipments = false);
       }
     }
   }
@@ -742,6 +715,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             '✅ [MQTT Live] Connected. Subscribing to $statusTopic and $onlineTopic');
         _persistentMqttClient!.subscribe('testir', MqttQos.atLeastOnce);
         _persistentMqttClient!.subscribe('testir/#', MqttQos.atLeastOnce);
+        _persistentMqttClient!.subscribe('Test_ir', MqttQos.atLeastOnce);
+        _persistentMqttClient!.subscribe('Test_ir/#', MqttQos.atLeastOnce);
         _persistentMqttClient!.subscribe(statusTopic, MqttQos.atLeastOnce);
         _persistentMqttClient!.subscribe(onlineTopic, MqttQos.atLeastOnce);
         _subscribedDeviceId = _deviceId;
@@ -800,6 +775,12 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
             incomingDeviceId == 'Sustainabyte_testir';
 
         if (isMatchingDevice) {
+          // Dynamically bind to the physical device ID if they differ
+          if (incomingDeviceId.isNotEmpty && _deviceId != incomingDeviceId) {
+            debugPrint('🔄 Updating _deviceId from $_deviceId to $incomingDeviceId to match physical hardware');
+            _deviceId = incomingDeviceId;
+          }
+
           // Efficiently reset watchdog by simply updating the timestamp
           _lastMessageReceivedTime = DateTime.now();
           _lastMqttUpdateTime = (p['time'] ??
@@ -811,6 +792,11 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           if (p['temp'] != null || p['current_temp'] != null) {
             _actualTemperature =
                 (p['temp'] ?? p['current_temp'] as num).toDouble();
+            hasChanges = true;
+          }
+          if (p['set_temp'] != null || p['setTemp'] != null) {
+            _setTemperature =
+                (p['set_temp'] ?? p['setTemp'] as num).toDouble();
             hasChanges = true;
           }
           if (p['hum'] != null) {
@@ -1053,16 +1039,25 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         _lastMessageReceivedTime = DateTime.now();
         if (upperPayload == 'ON_SUCCESS' ||
             upperPayload == 'STATUS_ON' ||
+            upperPayload == 'AC_ON_DONE' ||
             upperPayload.contains('AC:ON')) {
           _isPowerCommandLock = false;
           _isPowerOn = true;
           hasChanges = true;
         } else if (upperPayload == 'OFF_SUCCESS' ||
             upperPayload == 'STATUS_OFF' ||
+            upperPayload == 'AC_OFF_DONE' ||
             upperPayload.contains('AC:OFF')) {
           _isPowerCommandLock = false;
           _isPowerOn = false;
           hasChanges = true;
+        } else if (upperPayload.startsWith('TEMP_SET')) {
+          final valStr = upperPayload.replaceAll('TEMP_SET', '').replaceAll('_', '').replaceAll(':', '').trim();
+          final val = double.tryParse(valStr);
+          if (val != null) {
+            _setTemperature = val;
+            hasChanges = true;
+          }
         } else if (upperPayload.contains('OFFLINE') ||
             upperPayload.contains('INACTIVE')) {
           final bool wasOnline = _isOnline;
@@ -1179,7 +1174,17 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     // Dynamically construct topic based on the selected device ID (IMEI/ShortId)
     // Fallback to Sustainabyte_testir for compatibility with legacy hardware
     final String id = _deviceId.isEmpty ? 'Sustainabyte_testir' : _deviceId;
-    return 'testir/Sustainabyte_testir/$type';
+    if (type == 'control') {
+      return AppConfig.getMqttControlTopic(id);
+    } else if (type == 'schedule') {
+      return AppConfig.getMqttScheduleTopic(id);
+    } else if (type == 'status') {
+      return AppConfig.getMqttStatusTopic(id);
+    } else if (type == 'temp') {
+      return AppConfig.getMqttTempTopic(id);
+    }
+    // Fallback for online or other types
+    return 'Test_ir/$id/$type';
   }
 
   Future<void> _publishMqttCommand(String message,
@@ -1189,6 +1194,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       return;
     }
     final String targetTopic = topic ?? _getDeviceTopic('control');
+    debugPrint('📤 [MQTT Publish] Topic: $targetTopic, Message: $message');
 
     // Fast Path: Reuse existing persistent connection
     if (_persistentMqttClient != null &&
@@ -1553,11 +1559,13 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
                     colorScheme: colorScheme,
                     onTempChanged: (double val) {
                       setState(() => _setTemperature = val);
-                      _publishMqttCommand('TEMP_CN:${val.toInt()}');
+                      _publishMqttCommand('${val.toInt()}',
+                          topic: _getDeviceTopic('temp'));
                     },
                     onClearTemp: () {
                       setState(() => _setTemperature = 24.0);
-                      _publishMqttCommand('TEMP_CLEAR');
+                      _publishMqttCommand('24',
+                          topic: _getDeviceTopic('temp'));
                     },
                     onDisabledInteraction: _showOfflineWarning,
                   ),
@@ -5240,17 +5248,13 @@ class _InteractiveThermostatGaugeState
         // Minus Button
         _buildSideControl(
           icon: Icons.remove,
-          onTapDown: (_) {
+          onTap: () {
             if (widget.isOnline) {
-              _startButtonPressTimer(() {
-                widget.onTempChanged((widget.setTemp - 1).clamp(16.0, 30.0));
-              });
+              widget.onTempChanged((widget.setTemp - 1).clamp(16.0, 30.0));
             } else {
               widget.onDisabledInteraction?.call();
             }
           },
-          onTapUp: (_) => _cancelButtonPressTimer(),
-          onTapCancel: () => _cancelButtonPressTimer(),
           color: widget.isOnline ? activeColor : Colors.grey,
           size: buttonSize,
         ),
@@ -5389,17 +5393,13 @@ class _InteractiveThermostatGaugeState
         // Plus Button
         _buildSideControl(
           icon: Icons.add,
-          onTapDown: (_) {
+          onTap: () {
             if (widget.isOnline) {
-              _startButtonPressTimer(() {
-                widget.onTempChanged((widget.setTemp + 1).clamp(16.0, 30.0));
-              });
+              widget.onTempChanged((widget.setTemp + 1).clamp(16.0, 30.0));
             } else {
               widget.onDisabledInteraction?.call();
             }
           },
-          onTapUp: (_) => _cancelButtonPressTimer(),
-          onTapCancel: () => _cancelButtonPressTimer(),
           color: widget.isOnline ? activeColor : Colors.grey,
           size: buttonSize,
         ),
@@ -5410,9 +5410,7 @@ class _InteractiveThermostatGaugeState
   Widget _buildSideControl({
     required IconData icon,
     required Color color,
-    required GestureTapDownCallback onTapDown,
-    required GestureTapUpCallback onTapUp,
-    required VoidCallback onTapCancel,
+    required VoidCallback onTap,
     double size = 52,
   }) {
     // Auto-color: green for +, red for −
@@ -5422,9 +5420,7 @@ class _InteractiveThermostatGaugeState
         : Colors.grey;
 
     return GestureDetector(
-      onTapDown: onTapDown,
-      onTapUp: onTapUp,
-      onTapCancel: onTapCancel,
+      onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
         width: size,

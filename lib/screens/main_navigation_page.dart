@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:ir_blaster_ac/screens/mode_selection_page.dart';
-import 'package:ir_blaster_ac/screens/ac_app/dashboard_screen.dart';
+import 'package:ir_blaster_ac/core/constants/colors.dart';
 import 'package:ir_blaster_ac/screens/ac_app/system_view.dart';
-import 'package:ir_blaster_ac/screens/ac_app/device_detail_page.dart';
-import 'package:ir_blaster_ac/widgets/top_navbar.dart';
+import 'package:ir_blaster_ac/screens/ac_app/dashboard_screen.dart';
+import 'package:ir_blaster_ac/screens/ac_app/settings_page.dart';
+import 'package:ir_blaster_ac/screens/ac_app/ac_control_page.dart';
+import 'package:ir_blaster_ac/screens/bluetooth_scanner_page.dart';
+import 'package:ir_blaster_ac/core/services/mqtt_service.dart';
+import 'package:ir_blaster_ac/screens/widgets/wifi_management_dialog.dart';
 
 class MainNavigationPage extends StatefulWidget {
   final int initialIndex;
@@ -16,163 +19,288 @@ class MainNavigationPage extends StatefulWidget {
 
 class _MainNavigationPageState extends State<MainNavigationPage> {
   int _currentIndex = 0;
-  late final PageController _pageController;
   int _systemCount = 0;
+  final GlobalKey<SystemViewPageState> _systemViewKey = GlobalKey<SystemViewPageState>();
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
-    _pageController = PageController(initialPage: _currentIndex);
-  }
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDark ? AppColors.backgroundDark : AppColors.background;
+    final textColor = isDark ? AppColors.textPrimaryDark : AppColors.textPrimary;
+    final subtitleColor = isDark ? AppColors.textSecondaryDark : AppColors.textSecondary;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF1B172E) : const Color(0xFFF8FAFC),
-      body: Column(
-        children: [
-          // Top Navbar (Only show for AC App tabs)
-          if (_currentIndex > 0)
-            SafeArea(
-              bottom: false,
-              child: TopNavbar(
-                showIcons: true,
-                hideBranding: _currentIndex == 1, // Hide branding on Systems View
-                title: _currentIndex == 1 ? 'SYSTEMS VIEW' : 'SUMMARY',
-                totalCount: _currentIndex == 1 ? '$_systemCount' : null,
+      backgroundColor: bgColor,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // ── Top Header ──
+            _buildHeader(isDark, textColor, subtitleColor),
+
+            // ── Tab Body ──
+            Expanded(
+              child: IndexedStack(
+                index: _currentIndex,
+                children: [
+                  // Tab 0: Systems
+                   SystemViewPage(
+                    key: _systemViewKey,
+                    onCountChanged: (count) =>
+                        setState(() => _systemCount = count),
+                    onViewPressed: (systemId, systemName, systemShortId) async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ACControlPage(
+                            deviceName: systemName,
+                            systemId: systemId,
+                            systemShortId: systemShortId,
+                          ),
+                        ),
+                      );
+                      _systemViewKey.currentState?.refreshData();
+                    },
+                  ),
+                  // Tab 1: Analytics
+                  _currentIndex == 1 ? const DashboardScreen() : const SizedBox.shrink(),
+                  // Tab 2: Settings
+                  const SettingsPage(),
+                ],
               ),
             ),
-
-          Expanded(
-            child: PageView(
-              controller: _pageController,
-              onPageChanged: (index) => setState(() => _currentIndex = index),
-              children: [
-                const ModeSelectionPage(),
-                SystemViewPage(
-                  onCountChanged: (count) => setState(() => _systemCount = count),
-                  onViewPressed: (systemId, systemName, systemShortId) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => DeviceDetailPage(
-                          deviceName: systemName,
-                          systemId: systemId,
-                          systemShortId: systemShortId,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                const DashboardScreen(),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
       bottomNavigationBar: _buildBottomBar(isDark),
     );
   }
 
+  Widget _buildHeader(bool isDark, Color textColor, Color subtitleColor) {
+    final titles = ['Systems', 'Energy & Usage Insights', 'Settings'];
+    final subtitles = [
+      '$_systemCount systems',
+      'Monitor your consumption',
+      'System configurations',
+    ];
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                titles[_currentIndex],
+                style: GoogleFonts.outfit(
+                  color: textColor,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitles[_currentIndex],
+                style: GoogleFonts.inter(
+                  color: subtitleColor,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              // WiFi Reset Button
+              GestureDetector(
+                onTap: () {
+                  showDialog(
+                    context: context,
+                    builder: (ctx) => WifiManagementDialog(
+                      mqtt: MqttService(),
+                      initialSsid: '',
+                    ),
+                  );
+                },
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.surfaceDark : Colors.white,
+                    border: Border.all(
+                      color: isDark ? AppColors.dividerDark : AppColors.divider,
+                      width: 1,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.wifi_rounded,
+                    color: AppColors.offline,
+                    size: 20,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const BluetoothScannerPage(),
+                    ),
+                  );
+                },
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.surfaceDark : Colors.white,
+                    border: Border.all(
+                      color: isDark ? AppColors.dividerDark : AppColors.divider,
+                      width: 1,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.bluetooth_searching_rounded,
+                    color: AppColors.primary,
+                    size: 20,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              // User Avatar
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [AppColors.primary, AppColors.primaryLight],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.primary.withValues(alpha: 0.2),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.person_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBottomBar(bool isDark) {
-    if (_currentIndex == 0) {
-      // Mode Selection Navbar
-      return Container(
-        decoration: BoxDecoration(
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 10,
-              offset: const Offset(0, -2),
-            ),
-          ],
+    final cardColor = isDark ? AppColors.surfaceDark : AppColors.surface;
+    final borderColor = isDark ? AppColors.dividerDark : AppColors.divider;
+    final selectedColor = AppColors.primary;
+    final unselectedColor = isDark ? AppColors.textSecondaryDark : AppColors.textHint;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: cardColor,
+        border: Border(top: BorderSide(color: borderColor, width: 0.5)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.06),
+            blurRadius: 20,
+            offset: const Offset(0, -5),
+          ),
+        ],
+      ),
+      child: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          if (index == 0) {
+            _systemViewKey.currentState?.refreshData();
+          }
+          setState(() => _currentIndex = index);
+        },
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        selectedItemColor: selectedColor,
+        unselectedItemColor: unselectedColor,
+        type: BottomNavigationBarType.fixed,
+        selectedLabelStyle: GoogleFonts.inter(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
         ),
-        child: BottomNavigationBar(
-          currentIndex: 0,
-          onTap: (index) {
-            if (index == 1) {
-              _pageController.animateToPage(1,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut);
-            }
-          },
-          backgroundColor: isDark ? const Color(0xFF1A1A2E) : Colors.white,
-          selectedItemColor: const Color(0xFF6CC042),
-          unselectedItemColor: isDark ? Colors.white54 : Colors.black45,
-          selectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 12),
-          type: BottomNavigationBarType.fixed,
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.settings_remote),
-              label: 'Mode Selection',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.grid_view_outlined),
-              label: 'Views',
-            ),
-          ],
+        unselectedLabelStyle: GoogleFonts.inter(
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
         ),
-      );
-    } else {
-      // AC App Navbar
-      return Container(
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 20,
-              offset: const Offset(0, -5),
+        items: [
+          BottomNavigationBarItem(
+            icon: _buildNavIcon(Icons.layers_outlined, 0, unselectedColor),
+            activeIcon: _buildNavIcon(Icons.layers_rounded, 0, selectedColor),
+            label: 'Systems',
+          ),
+          BottomNavigationBarItem(
+            icon: _buildNavIcon(Icons.trending_up_rounded, 1, unselectedColor),
+            activeIcon: _buildNavIcon(Icons.trending_up_rounded, 1, selectedColor),
+            label: 'Analytics',
+          ),
+          BottomNavigationBarItem(
+            icon: _buildNavIcon(Icons.settings_outlined, 2, unselectedColor),
+            activeIcon: _buildNavIcon(Icons.settings_rounded, 2, selectedColor),
+            label: 'Settings',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNavIcon(IconData icon, int index, Color color) {
+    final isActive = _currentIndex == index;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (isActive)
+          Container(
+            width: 24,
+            height: 3,
+            margin: const EdgeInsets.only(bottom: 4),
+            decoration: BoxDecoration(
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(2),
             ),
-          ],
-        ),
-        child: BottomNavigationBar(
-          currentIndex: _currentIndex,
-          onTap: (index) {
-            if (index == 0) {
-              _pageController.animateToPage(0,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut);
-            } else {
-              _pageController.animateToPage(index,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut);
-            }
-          },
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          selectedItemColor: const Color(0xFF6CC042),
-          unselectedItemColor: isDark ? Colors.white38 : Colors.black38,
-          type: BottomNavigationBarType.fixed,
-          selectedLabelStyle: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w700),
-          unselectedLabelStyle: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w600),
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.arrow_back_ios_new_rounded),
-              label: 'Back',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.layers_outlined),
-              activeIcon: Icon(Icons.layers_rounded),
-              label: 'Systems',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.dashboard_outlined),
-              activeIcon: Icon(Icons.dashboard_rounded),
-              label: 'Summary',
-            ),
-          ],
-        ),
-      );
-    }
+          )
+        else
+          const SizedBox(height: 7),
+        Icon(icon, color: color, size: 22),
+      ],
+    );
   }
 }

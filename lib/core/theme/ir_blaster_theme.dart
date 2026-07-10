@@ -1,26 +1,24 @@
-// import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:ir_blaster_ac/core/constants/colors.dart';
 
-/// Single source of truth for IR Blaster colors and [ThemeData].
+/// Single source of truth for IR Blaster colors via [ThemeExtension].
 ///
-/// Change brand / surface / text colors here — [AppColors] and [ThemeData]
-/// follow automatically. User light/dark preference is applied via
-/// [ThemeProvider] + [ThemeMode] in [main.dart].
+/// Uses the **Modern Eco-Tech** palette from [AppColors].
+/// User light/dark preference is applied via [ThemeProvider] + [ThemeMode] in [main.dart].
 abstract final class IrBlasterBrand {
-  static const Color accent = Color(0xFF6CC042);
-  static const Color scaffoldDark = Color(0xFF1B172E);
-  static const Color surfaceDark = Color(0xFF2A244D);
-  static const Color borderDark = Color(0xFF3D3560);
-  static const Color scaffoldLight = Color(0xFFF8FAFC);
-  static const Color surfaceLight = Color(0xFFFFFFFF);
-  static const Color borderLight = Color(0xFFE0E0E0);
-  static const Color primaryDark = Color(0xFF1B172E);
-  static const Color error = Color(0xFFE63946);
-  static const Color running = Color(0xFF6CC042);
-  static const Color stopped = Color(0xFFE63946);
-  static const Color moving = Color(0xFF0077BE);
-  static const Color cardBackgroundLight = Color(0xFFE5E5E5);
+  static const Color accent = AppColors.primary;
+  static const Color scaffoldDark = AppColors.backgroundDark;
+  static const Color surfaceDark = AppColors.surfaceDark;
+  static const Color borderDark = AppColors.dividerDark;
+  static const Color scaffoldLight = AppColors.background;
+  static const Color surfaceLight = AppColors.surface;
+  static const Color borderLight = AppColors.divider;
+  static const Color primaryDark = AppColors.backgroundDark;
+  static const Color error = AppColors.offline;
+  static const Color running = AppColors.online;
+  static const Color stopped = AppColors.offline;
+  static const Color moving = AppColors.coolBlue;
+  static const Color cardBackgroundLight = AppColors.background;
 }
 
 /// Semantic colors exposed through [ThemeExtension] (light + dark palettes).
@@ -55,33 +53,33 @@ class IrBlasterColors extends ThemeExtension<IrBlasterColors> {
   final Color disconnected;
 
   static const IrBlasterColors dark = IrBlasterColors(
-    scaffoldBackground: IrBlasterBrand.scaffoldDark,
-    surfaceElevated: IrBlasterBrand.surfaceDark,
-    accent: IrBlasterBrand.accent,
-    border: IrBlasterBrand.borderDark,
-    textPrimary: Colors.white,
-    textSecondary: Color(0xFFB0B0B0),
-    navBar: IrBlasterBrand.scaffoldDark,
-    cardBackground: IrBlasterBrand.surfaceDark,
-    running: IrBlasterBrand.running,
-    stopped: IrBlasterBrand.stopped,
-    moving: IrBlasterBrand.moving,
-    disconnected: IrBlasterBrand.stopped,
+    scaffoldBackground: AppColors.backgroundDark,
+    surfaceElevated: AppColors.surfaceDark,
+    accent: AppColors.primary,
+    border: AppColors.dividerDark,
+    textPrimary: AppColors.textPrimaryDark,
+    textSecondary: AppColors.textSecondaryDark,
+    navBar: AppColors.surfaceDark,
+    cardBackground: AppColors.surfaceDark,
+    running: AppColors.online,
+    stopped: AppColors.offline,
+    moving: AppColors.coolBlue,
+    disconnected: AppColors.offline,
   );
 
   static const IrBlasterColors light = IrBlasterColors(
-    scaffoldBackground: IrBlasterBrand.scaffoldLight,
-    surfaceElevated: IrBlasterBrand.surfaceLight,
-    accent: IrBlasterBrand.accent,
-    border: IrBlasterBrand.borderLight,
-    textPrimary: Colors.black87,
-    textSecondary: Colors.black54,
-    navBar: IrBlasterBrand.surfaceLight,
-    cardBackground: IrBlasterBrand.cardBackgroundLight,
-    running: IrBlasterBrand.running,
-    stopped: IrBlasterBrand.stopped,
-    moving: IrBlasterBrand.moving,
-    disconnected: IrBlasterBrand.stopped,
+    scaffoldBackground: AppColors.background,
+    surfaceElevated: AppColors.surface,
+    accent: AppColors.primary,
+    border: AppColors.divider,
+    textPrimary: AppColors.textPrimary,
+    textSecondary: AppColors.textSecondary,
+    navBar: AppColors.surface,
+    cardBackground: AppColors.background,
+    running: AppColors.online,
+    stopped: AppColors.offline,
+    moving: AppColors.coolBlue,
+    disconnected: AppColors.offline,
   );
 
   @override
@@ -136,8 +134,3 @@ class IrBlasterColors extends ThemeExtension<IrBlasterColors> {
     );
   }
 }
-
-/// Builds light/dark [ThemeData] via [flex_color_scheme].
-
-/// Convenient [BuildContext] access: `context.irColors.accent`
-

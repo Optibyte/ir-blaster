@@ -52,7 +52,7 @@ class MainApp extends StatelessWidget {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Optibyte - IR Blaster',
+      title: 'IR Blaster',
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeProvider.themeMode,
@@ -87,35 +87,62 @@ class _AuthGateState extends State<_AuthGate> {
         }
 
         if (snapshot.hasError) {
+          final isDark = Theme.of(context).brightness == Brightness.dark;
           return Scaffold(
+            backgroundColor:
+                isDark ? AppColors.backgroundDark : AppColors.background,
             body: Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.error_outline,
-                      color: Color.fromARGB(255, 247, 134, 126), size: 48),
-                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.offline.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.wifi_off_rounded,
+                        color: AppColors.offline, size: 40),
+                  ),
+                  const SizedBox(height: 20),
                   Text(
                     'Connection Error',
-                    style: GoogleFonts.poppins(
-                        fontSize: 18, fontWeight: FontWeight.w600),
+                    style: GoogleFonts.outfit(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: isDark
+                          ? AppColors.textPrimaryDark
+                          : AppColors.textPrimary,
+                    ),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     'Please check your internet connection',
-                    style: TextStyle(fontSize: 14),
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: isDark
+                          ? AppColors.textSecondaryDark
+                          : AppColors.textSecondary,
+                    ),
                   ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
+                  const SizedBox(height: 28),
+                  ElevatedButton.icon(
                     onPressed: () {
                       setState(() {
                         _authFuture = _checkAuth();
                       });
                     },
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: Text('Retry',
+                        style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.button),
-                    child: Text('Retry',
-                        style: GoogleFonts.poppins(color: Colors.white)),
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 28, vertical: 14),
+                    ),
                   ),
                 ],
               ),

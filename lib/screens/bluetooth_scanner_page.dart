@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'package:ir_blaster_ac/core/services/mqtt_service.dart';
 import 'configuration_page.dart';
 
 class BluetoothScannerPage extends StatefulWidget {
-  const BluetoothScannerPage({super.key});
+  final bool returnConnection;
+  const BluetoothScannerPage({super.key, this.returnConnection = false});
 
   @override
   State<BluetoothScannerPage> createState() => _BluetoothScannerPageState();
@@ -296,15 +298,21 @@ class _BluetoothScannerPageState extends State<BluetoothScannerPage> {
             backgroundColor: _themeGreen,
           ),
         );
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ConfigurationPage(
-              connection: connection,
-              device: device,
+        if (widget.returnConnection) {
+          MqttService().bluetoothConnection = connection;
+          MqttService().bluetoothDevice = device;
+          Navigator.pop(context, true);
+        } else {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ConfigurationPage(
+                connection: connection,
+                device: device,
+              ),
             ),
-          ),
-        );
+          );
+        }
       }
     } catch (e) {
       if (mounted) {

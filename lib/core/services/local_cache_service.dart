@@ -7,15 +7,19 @@ class LocalCacheService {
   static const String _devicePrefix = 'cache_device_';
   static const String _wifiSsidKey = 'wifi_ssid';
   static const String _wifiPasswordKey = 'wifi_password';
+  static const String _wifiSsid2Key = 'wifi_ssid_2';
+  static const String _wifiPassword2Key = 'wifi_password_2';
 
   /// Save dashboard data to local storage
   static Future<void> saveDashboardData(Map<String, dynamic> data) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_dashboardCacheKey, jsonEncode({
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'data': data,
-      }));
+      await prefs.setString(
+          _dashboardCacheKey,
+          jsonEncode({
+            'timestamp': DateTime.now().millisecondsSinceEpoch,
+            'data': data,
+          }));
     } catch (e) {
       debugPrint('⚠️ [Cache] Error saving dashboard: $e');
     }
@@ -36,13 +40,16 @@ class LocalCacheService {
   }
 
   /// Save specific device data (Temp, Hum, Power)
-  static Future<void> saveDeviceStatus(String deviceId, Map<String, dynamic> status) async {
+  static Future<void> saveDeviceStatus(
+      String deviceId, Map<String, dynamic> status) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('$_devicePrefix$deviceId', jsonEncode({
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'status': status,
-      }));
+      await prefs.setString(
+          '$_devicePrefix$deviceId',
+          jsonEncode({
+            'timestamp': DateTime.now().millisecondsSinceEpoch,
+            'status': status,
+          }));
     } catch (e) {
       debugPrint('⚠️ [Cache] Error saving device status: $e');
     }
@@ -63,13 +70,16 @@ class LocalCacheService {
   }
 
   /// Save equipment list for a specific system
-  static Future<void> saveEquipmentList(String systemId, List<dynamic> data) async {
+  static Future<void> saveEquipmentList(
+      String systemId, List<dynamic> data) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('equip_list_$systemId', jsonEncode({
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'data': data,
-      }));
+      await prefs.setString(
+          'equip_list_$systemId',
+          jsonEncode({
+            'timestamp': DateTime.now().millisecondsSinceEpoch,
+            'data': data,
+          }));
     } catch (e) {
       debugPrint('⚠️ [Cache] Error saving equip list: $e');
     }
@@ -90,7 +100,7 @@ class LocalCacheService {
     return null;
   }
 
-  /// Save WiFi credentials
+  /// Save WiFi credentials (primary)
   static Future<void> saveWifiCredentials(String ssid, String password) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -102,7 +112,20 @@ class LocalCacheService {
     }
   }
 
-  /// Retrieve WiFi credentials
+  /// Save secondary WiFi credentials (fallback)
+  static Future<void> saveSecondaryWifiCredentials(
+      String ssid, String password) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_wifiSsid2Key, ssid);
+      await prefs.setString(_wifiPassword2Key, password);
+      debugPrint('✅ [Cache] Secondary WiFi credentials saved.');
+    } catch (e) {
+      debugPrint('⚠️ [Cache] Error saving secondary WiFi credentials: $e');
+    }
+  }
+
+  /// Retrieve WiFi credentials (primary)
   static Future<Map<String, String>> getWifiCredentials() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -113,6 +136,44 @@ class LocalCacheService {
     } catch (e) {
       debugPrint('⚠️ [Cache] Error reading WiFi credentials: $e');
       return {'ssid': '', 'password': ''};
+    }
+  }
+
+  /// Retrieve secondary WiFi credentials (fallback)
+  static Future<Map<String, String>> getSecondaryWifiCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return {
+        'ssid': prefs.getString(_wifiSsid2Key) ?? '',
+        'password': prefs.getString(_wifiPassword2Key) ?? '',
+      };
+    } catch (e) {
+      debugPrint('⚠️ [Cache] Error reading secondary WiFi credentials: $e');
+      return {'ssid': '', 'password': ''};
+    }
+  }
+
+  /// Clear WiFi credentials (primary)
+  static Future<void> clearWifiCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_wifiSsidKey);
+      await prefs.remove(_wifiPasswordKey);
+      debugPrint('🧹 [Cache] Primary WiFi credentials cleared.');
+    } catch (e) {
+      debugPrint('⚠️ [Cache] Error clearing WiFi credentials: $e');
+    }
+  }
+
+  /// Clear secondary WiFi credentials (fallback)
+  static Future<void> clearSecondaryWifiCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_wifiSsid2Key);
+      await prefs.remove(_wifiPassword2Key);
+      debugPrint('🧹 [Cache] Secondary WiFi credentials cleared.');
+    } catch (e) {
+      debugPrint('⚠️ [Cache] Error clearing secondary WiFi credentials: $e');
     }
   }
 

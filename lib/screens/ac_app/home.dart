@@ -6,6 +6,7 @@ import 'package:ir_blaster_ac/screens/ac_app/equipment_view.dart';
 import 'package:ir_blaster_ac/screens/ac_app/device_detail_page.dart';
 import 'package:ir_blaster_ac/screens/ac_app/ac_control_page.dart';
 import 'package:ir_blaster_ac/screens/ac_app/dashboard_screen.dart';
+import 'package:ir_blaster_ac/core/constants/colors.dart';
 
 class HomePage extends StatefulWidget {
   final VoidCallback? onBack;
@@ -20,6 +21,8 @@ class _HomePageState extends State<HomePage> {
   late final PageController _pageController;
   int _systemCount = 0;
   int _equipmentCount = 0;
+  final GlobalKey<SystemViewPageState> _systemViewKey = GlobalKey<SystemViewPageState>();
+  final GlobalKey<EquipmentViewPageState> _equipmentViewKey = GlobalKey<EquipmentViewPageState>();
 
   @override
   void initState() {
@@ -38,7 +41,7 @@ class _HomePageState extends State<HomePage> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF1B172E) : const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? AppColors.backgroundDark : AppColors.background,
       body: Column(
         children: [
           // Top Navbar
@@ -70,36 +73,40 @@ class _HomePageState extends State<HomePage> {
               children: [
                 const DashboardScreen(),
                 EquipmentViewPage(
+                  key: _equipmentViewKey,
                   onCountChanged: (count) =>
                       setState(() => _equipmentCount = count),
                   onEquipmentTap:
-                      (equipmentId, name, systemId, systemShortId) {
-                    Navigator.push(
+                      (equipmentId, name, systemId, systemShortId) async {
+                    await Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => DeviceDetailPage(
+                        builder: (context) => ACControlPage(
                           deviceName: name,
                           systemId: systemId,
                           systemShortId: systemShortId,
                         ),
                       ),
                     );
+                    _equipmentViewKey.currentState?.refreshData();
                   },
                 ),
                 SystemViewPage(
+                  key: _systemViewKey,
                   onCountChanged: (count) =>
                       setState(() => _systemCount = count),
-                  onViewPressed: (systemId, systemName, systemShortId) {
-                    Navigator.push(
+                  onViewPressed: (systemId, systemName, systemShortId) async {
+                    await Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => DeviceDetailPage(
+                        builder: (context) => ACControlPage(
                           deviceName: systemName,
                           systemId: systemId,
                           systemShortId: systemShortId,
                         ),
                       ),
                     );
+                    _systemViewKey.currentState?.refreshData();
                   },
                 ),
               ],
@@ -109,12 +116,15 @@ class _HomePageState extends State<HomePage> {
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
+          color: isDark ? AppColors.surfaceDark : AppColors.surface,
+          border: Border(
+            top: BorderSide(color: isDark ? AppColors.dividerDark : AppColors.divider, width: 1),
+          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 20,
-              offset: const Offset(0, -5),
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
             ),
           ],
         ),
@@ -124,6 +134,11 @@ class _HomePageState extends State<HomePage> {
             if (index == 0) {
               widget.onBack?.call();
             } else {
+              if (index == 2) {
+                _equipmentViewKey.currentState?.refreshData();
+              } else if (index == 3) {
+                _systemViewKey.currentState?.refreshData();
+              }
               _pageController.animateToPage(
                 index - 1,
                 duration: const Duration(milliseconds: 300),
@@ -133,14 +148,14 @@ class _HomePageState extends State<HomePage> {
           },
           backgroundColor: Colors.transparent,
           elevation: 0,
-          selectedItemColor: const Color(0xFF6CC042),
+          selectedItemColor: AppColors.primary,
           unselectedItemColor: isDark ? Colors.white38 : Colors.black38,
           type: BottomNavigationBarType.fixed,
-          selectedLabelStyle: GoogleFonts.poppins(
+          selectedLabelStyle: GoogleFonts.inter(
             fontSize: 10,
             fontWeight: FontWeight.w700,
           ),
-          unselectedLabelStyle: GoogleFonts.poppins(
+          unselectedLabelStyle: GoogleFonts.inter(
             fontSize: 10,
             fontWeight: FontWeight.w600,
           ),
@@ -225,8 +240,8 @@ class _HomePageState extends State<HomePage> {
       children: [
         Text(
           title,
-          style: GoogleFonts.poppins(
-            color: isDark ? Colors.white : const Color(0xFF1B172E),
+          style: GoogleFonts.outfit(
+            color: isDark ? AppColors.textPrimaryDark : AppColors.textPrimary,
             fontSize: 14,
             fontWeight: FontWeight.w700,
           ),
@@ -236,8 +251,8 @@ class _HomePageState extends State<HomePage> {
           children: [
             RichText(
               text: TextSpan(
-                style: GoogleFonts.poppins(
-                  color: isDark ? Colors.white : const Color(0xFF1B172E),
+                style: GoogleFonts.inter(
+                  color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondary,
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
@@ -245,14 +260,14 @@ class _HomePageState extends State<HomePage> {
                   TextSpan(text: label),
                   TextSpan(
                     text: value,
-                    style: const TextStyle(color: Color(0xFF6CC042)),
+                    style: const TextStyle(color: AppColors.primary),
                   ),
                   if (extra != null) ...[
                     const TextSpan(text: '     '),
                     TextSpan(text: extra.split(':')[0] + ': '),
                     TextSpan(
                       text: extra.split(':')[1],
-                      style: const TextStyle(color: Color(0xFF6CC042)),
+                      style: const TextStyle(color: AppColors.primary),
                     ),
                   ],
                 ],
@@ -262,12 +277,12 @@ class _HomePageState extends State<HomePage> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               decoration: BoxDecoration(
-                color: const Color(0xFF6CC042).withOpacity(0.4),
+                color: AppColors.primary.withOpacity(0.4),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
                 'View List',
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.inter(
                   color: Colors.white,
                   fontSize: 8,
                   fontWeight: FontWeight.w700,
@@ -284,7 +299,7 @@ class _HomePageState extends State<HomePage> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 24),
       child: Divider(
-        color: (isDark ? Colors.white : const Color(0xFF1B172E)).withOpacity(
+        color: (isDark ? AppColors.textPrimaryDark : AppColors.textPrimary).withOpacity(
           0.1,
         ),
         thickness: 1,

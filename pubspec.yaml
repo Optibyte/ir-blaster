@@ -48,7 +48,7 @@ flutter:
     - assets/images/
     - .env
 
-flutter_icons:
+flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
   image_path: "assets/images/logo_padded.png"

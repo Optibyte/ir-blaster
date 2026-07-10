@@ -8,15 +8,15 @@ class ScheduleOverviewPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? AppColors.background : Colors.grey[50];
-    final textColor = isDark ? Colors.white : Colors.black87;
+    final bgColor = isDark ? AppColors.backgroundDark : AppColors.background;
+    final textColor = isDark ? AppColors.textPrimaryDark : AppColors.textPrimary;
 
     return Scaffold(
       backgroundColor: bgColor,
       appBar: AppBar(
         title: Text(
           'SCHEDULE OVERVIEW',
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.outfit(
             fontWeight: FontWeight.w700,
             fontSize: 18,
             color: textColor,
@@ -39,32 +39,32 @@ class ScheduleOverviewContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? Colors.white : Colors.black87;
+    final textColor = isDark ? AppColors.textPrimaryDark : AppColors.textPrimary;
 
     final schedules = [
       _ScheduleItem(
         time: '09:30 AM',
         title: 'Schedule ON',
         subtitle: 'AC will turn ON',
-        color: const Color(0xFF3B82F6),
+        color: AppColors.coolBlue,
       ),
       _ScheduleItem(
         time: '01:00 PM',
         title: 'Lunch OFF',
         subtitle: 'AC will turn OFF',
-        color: const Color(0xFFF59E0B),
+        color: AppColors.heatOrange,
       ),
       _ScheduleItem(
         time: '02:00 PM',
         title: 'Lunch ON',
         subtitle: 'AC will turn ON',
-        color: const Color(0xFF6CC042),
+        color: AppColors.primary,
       ),
       _ScheduleItem(
         time: '07:00 PM',
         title: 'Schedule OFF',
         subtitle: 'AC will turn OFF',
-        color: const Color(0xFFEF4444),
+        color: AppColors.offline,
       ),
     ];
 
@@ -73,10 +73,10 @@ class ScheduleOverviewContent extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF2A244D) : Colors.white,
+          color: isDark ? AppColors.surfaceDark : AppColors.surface,
           borderRadius: BorderRadius.circular(28),
           border: Border.all(
-            color: isDark ? Colors.white.withOpacity(0.05) : const Color(0xFF1B172E).withOpacity(0.08),
+            color: isDark ? AppColors.dividerDark : AppColors.divider,
           ),
         ),
         child: Column(
@@ -85,7 +85,7 @@ class ScheduleOverviewContent extends StatelessWidget {
           children: [
             Text(
               'Schedule Overview (All Systems)',
-              style: GoogleFonts.poppins(
+              style: GoogleFonts.outfit(
                 color: textColor,
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
@@ -142,7 +142,7 @@ class ScheduleOverviewContent extends StatelessWidget {
             width: 80,
             child: Text(
               item.time,
-              style: GoogleFonts.poppins(
+              style: GoogleFonts.inter(
                 color: textColor.withOpacity(0.9),
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
@@ -162,7 +162,7 @@ class ScheduleOverviewContent extends StatelessWidget {
                 children: [
                   Text(
                     item.title,
-                    style: GoogleFonts.poppins(
+                    style: GoogleFonts.outfit(
                       color: item.color,
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
@@ -171,7 +171,7 @@ class ScheduleOverviewContent extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     item.subtitle,
-                    style: GoogleFonts.poppins(
+                    style: GoogleFonts.inter(
                       color: textColor.withOpacity(0.4),
                       fontSize: 12,
                       fontWeight: FontWeight.w500,

@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:ir_blaster_ac/core/services/auth_service.dart';
 import 'package:ir_blaster_ac/core/config/app_config.dart';
+import 'package:ir_blaster_ac/core/constants/colors.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Equipment View page — mirrors the web's /equipments-view page.
 /// Shows all equipment grouped by their system type, with real-time status.
@@ -15,10 +17,10 @@ class EquipmentViewPage extends StatefulWidget {
   const EquipmentViewPage({super.key, this.onEquipmentTap, this.onCountChanged});
 
   @override
-  State<EquipmentViewPage> createState() => _EquipmentViewPageState();
+  State<EquipmentViewPage> createState() => EquipmentViewPageState();
 }
 
-class _EquipmentViewPageState extends State<EquipmentViewPage> {
+class EquipmentViewPageState extends State<EquipmentViewPage> {
   List<Map<String, dynamic>> _allEquipments = [];
   Map<String, List<Map<String, dynamic>>> _groupedBySystem = {};
   Map<String, String> _systemNames = {};
@@ -51,7 +53,7 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
       final queryString =
           queryParams.isNotEmpty ? '?${queryParams.join('&')}' : '';
       final url =
-          '${AppConfig.provisionBaseUrl}/equipments/ac/by-company$queryString';
+          '${AppConfig.provisionBaseUrl}/equipments$queryString';
 
       debugPrint('🌐 [EquipmentView] Fetching equipments: $url');
 
@@ -125,19 +127,45 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
         debugPrint('⚠️ [EquipmentView] Error fetching systems: $e');
       }
 
+      // Load local provisioned devices from SharedPreferences
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final localDevicesJson = prefs.getString('local_provisioned_devices') ?? '[]';
+        final List<dynamic> localList = jsonDecode(localDevicesJson);
+        for (var localDev in localList) {
+          final localMap = Map<String, dynamic>.from(localDev);
+          final String localId = (localMap['id'] ?? '').toString();
+          final exists = allEquips.any((e) {
+            final eId = (e['id'] ?? e['Id'] ?? '').toString();
+            final eShortId = (e['shortId'] ?? e['ShortId'] ?? '').toString();
+            return eId == localId || eShortId == localMap['shortId'];
+          });
+          if (!exists) {
+            allEquips.add(localMap);
+            sysNames['local_system'] = 'Local Devices';
+            debugPrint('➕ [EquipmentView] Added locally provisioned device to equipment list: ${localMap['name']}');
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ [EquipmentView] Error loading local provisioned devices: $e');
+      }
+
       // 3. Group equipments by systemId
+      final List<Map<String, dynamic>> filteredEquips = [];
       final Map<String, List<Map<String, dynamic>>> grouped = {};
       for (var eq in allEquips) {
-        final sysId = (eq['systemId'] ?? eq['SystemId'] ?? '').toString();
-        if (sysId.isEmpty) continue;
+        var sysId = (eq['systemId'] ?? eq['SystemId'] ?? '').toString();
+        if (sysId.isEmpty || sysId == 'local_system') continue;
+
+        filteredEquips.add(eq);
         grouped.putIfAbsent(sysId, () => []);
         grouped[sysId]!.add(eq);
       }
 
       if (mounted) {
-        widget.onCountChanged?.call(allEquips.length);
+        widget.onCountChanged?.call(filteredEquips.length);
         setState(() {
-          _allEquipments = allEquips;
+          _allEquipments = filteredEquips;
           _groupedBySystem = grouped;
           _systemNames = sysNames;
           _isLoading = false;
@@ -149,23 +177,40 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
     }
   }
 
+  Future<void> refreshData() async {
+    await _fetchEquipments();
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      color: isDark ? const Color(0xFF120E1F) : Colors.white,
+      color: isDark ? AppColors.backgroundDark : AppColors.background,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 24),
           Expanded(
             child: _isLoading
-                ? const Center(
-                    child:
-                        CircularProgressIndicator(color: Color(0xFF6CC042)),
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const CircularProgressIndicator(color: AppColors.primary),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Loading equipments...',
+                          style: GoogleFonts.outfit(
+                            color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
                   )
                 : RefreshIndicator(
-                    color: const Color(0xFF6CC042),
+                    color: AppColors.primary,
                     onRefresh: _fetchEquipments,
                     child: _allEquipments.isEmpty
                         ? _buildEmptyState(isDark)
@@ -196,8 +241,8 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
                 'No Equipment Found',
                 style: GoogleFonts.outfit(
                   color: isDark
-                      ? Colors.white.withValues(alpha: 0.4)
-                      : Colors.black.withValues(alpha: 0.35),
+                      ? AppColors.textSecondaryDark
+                      : AppColors.textSecondary,
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                 ),
@@ -205,10 +250,10 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
               const SizedBox(height: 4),
               Text(
                 'Pull down to refresh',
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.inter(
                   color: isDark
-                      ? Colors.white.withValues(alpha: 0.25)
-                      : Colors.black.withValues(alpha: 0.2),
+                      ? Colors.white24
+                      : Colors.black26,
                   fontSize: 13,
                 ),
               ),
@@ -221,14 +266,10 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
 
   Widget _buildEquipmentGrid(bool isDark) {
     final systemIds = _groupedBySystem.keys.toList();
-    final cardColor = isDark ? const Color(0xFF1E1A33) : const Color(0xFFF5F5F7);
-    final borderColor = isDark
-        ? Colors.white.withValues(alpha: 0.08)
-        : Colors.black.withValues(alpha: 0.05);
-    final textColor = isDark ? Colors.white : const Color(0xFF1B172E);
-    final subtitleColor = isDark
-        ? Colors.white.withValues(alpha: 0.5)
-        : Colors.black.withValues(alpha: 0.5);
+    final cardColor = isDark ? AppColors.surfaceDark : AppColors.surface;
+    final borderColor = isDark ? AppColors.dividerDark : AppColors.divider;
+    final textColor = isDark ? AppColors.textPrimaryDark : AppColors.textPrimary;
+    final subtitleColor = isDark ? AppColors.textSecondaryDark : AppColors.textSecondary;
 
     return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(
@@ -242,18 +283,18 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
 
         // Determine system icon based on system name
         IconData systemIcon = Icons.ac_unit_rounded;
-        Color systemIconColor = const Color(0xFF6CC042);
+        Color systemIconColor = AppColors.primary;
         if (systemName.toLowerCase().contains('light')) {
           systemIcon = Icons.lightbulb_outline_rounded;
           systemIconColor = const Color(0xFFFBBF24);
         } else if (systemName.toLowerCase().contains('energy') ||
             systemName.toLowerCase().contains('ems')) {
           systemIcon = Icons.bolt_rounded;
-          systemIconColor = const Color(0xFF0EA5E9);
+          systemIconColor = AppColors.coolBlue;
         } else if (systemName.toLowerCase().contains('diesel') ||
             systemName.toLowerCase().contains('dg')) {
           systemIcon = Icons.local_gas_station_rounded;
-          systemIconColor = const Color(0xFFF97316);
+          systemIconColor = AppColors.heatOrange;
         }
 
         return Padding(
@@ -291,14 +332,14 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF6CC042)
+                        color: AppColors.primary
                             .withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         'Equipments: ${equipments.length}',
-                        style: GoogleFonts.outfit(
-                          color: const Color(0xFF6CC042),
+                        style: GoogleFonts.inter(
+                          color: AppColors.primary,
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                         ),
@@ -319,7 +360,9 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
                     children: equipments.map((eq) {
                       final name =
                           (eq['name'] ?? eq['Name'] ?? 'Unknown').toString();
-                      final shortId = (eq['shortId'] ??
+                      final imei = (eq['imei'] ??
+                                  eq['Imei'] ??
+                                  eq['shortId'] ??
                                   eq['ShortId'] ??
                                   eq['equipmentShortId'] ??
                                   '')
@@ -351,13 +394,13 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
                       Color statusColor;
                       String statusLabel;
                       if (!isOnline) {
-                        statusColor = const Color(0xFF94A3B8);
+                        statusColor = AppColors.textHint;
                         statusLabel = 'Offline';
                       } else if (isRunning) {
-                        statusColor = const Color(0xFF6CC042);
+                        statusColor = AppColors.online;
                         statusLabel = 'Running';
                       } else {
-                        statusColor = const Color(0xFFEF4444);
+                        statusColor = AppColors.offline;
                         statusLabel = 'OFF';
                       }
 
@@ -371,7 +414,7 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
                             equipmentId,
                             name,
                             sysId,
-                            shortId,
+                            imei,
                           );
                         },
                         child: Container(
@@ -438,13 +481,13 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
                               ),
                               const SizedBox(height: 8),
                               // ID badge
-                              if (shortId.isNotEmpty)
+                              if (imei.isNotEmpty)
                                 Container(
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 8, vertical: 3),
                                   decoration: BoxDecoration(
                                     color: isDark
-                                        ? const Color(0xFF0E0B16)
+                                        ? AppColors.backgroundDark
                                         : Colors.white,
                                     borderRadius:
                                         BorderRadius.circular(6),
@@ -461,7 +504,7 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
                                     children: [
                                       Text(
                                         'ID: ',
-                                        style: GoogleFonts.outfit(
+                                        style: GoogleFonts.inter(
                                           color: subtitleColor,
                                           fontSize: 11,
                                           fontWeight: FontWeight.w500,
@@ -469,10 +512,10 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
                                       ),
                                       Flexible(
                                         child: Text(
-                                          shortId,
+                                          imei,
                                           overflow: TextOverflow.ellipsis,
                                           style: GoogleFonts.jetBrainsMono(
-                                            color: const Color(0xFF6CC042),
+                                            color: AppColors.primary,
                                             fontSize: 11,
                                             fontWeight: FontWeight.w600,
                                           ),
@@ -496,7 +539,7 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
                                     ),
                                     child: Text(
                                       statusLabel,
-                                      style: GoogleFonts.outfit(
+                                      style: GoogleFonts.inter(
                                         color: statusColor,
                                         fontSize: 10,
                                         fontWeight: FontWeight.w700,
@@ -509,7 +552,7 @@ class _EquipmentViewPageState extends State<EquipmentViewPage> {
                                       child: Text(
                                         acType,
                                         overflow: TextOverflow.ellipsis,
-                                        style: GoogleFonts.outfit(
+                                        style: GoogleFonts.inter(
                                           color: subtitleColor,
                                           fontSize: 10,
                                           fontWeight: FontWeight.w500,

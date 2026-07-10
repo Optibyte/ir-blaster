@@ -13,6 +13,8 @@ import 'widgets/ac_control_widget.dart';
 import 'widgets/temperature_widget.dart';
 import 'widgets/wifi_section_widget.dart';
 import '../core/services/local_cache_service.dart';
+import '../core/config/app_config.dart';
+import '../core/services/mqtt_config_service.dart';
 
 class ConfigurationPage extends StatefulWidget {
   final BluetoothConnection connection;
@@ -126,15 +128,15 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
   String _mqttStatus = "MQTT not connected";
 
   final TextEditingController _mqttHostController =
-      TextEditingController(text: "13.66.130.236");
+      TextEditingController(text: AppConfig.mqttBroker);
   final TextEditingController _mqttPortController =
-      TextEditingController(text: "1883");
+      TextEditingController(text: AppConfig.mqttPort.toString());
   final TextEditingController _mqttUserController =
-      TextEditingController(text: "testir");
+      TextEditingController(text: AppConfig.mqttUsername);
   final TextEditingController _mqttPassController =
-      TextEditingController(text: "ir@123");
+      TextEditingController(text: AppConfig.mqttPassword);
   final TextEditingController _mqttTopicController =
-      TextEditingController(text: "sustainabyte/testir/control");
+      TextEditingController(text: AppConfig.mqttTopic);
 
   // ===================== Auto control =====================
   bool _autoControlEnabled = false;
@@ -186,7 +188,9 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     _isConnected = _connection.isConnected;
     _isYellowLedOn = _isConnected;
 
-    _loadSavedState();
+    _loadSavedState().then((_) {
+      _loadMqttConfig();
+    });
     _listenBluetooth();
     _startBluetoothStateMonitor();
 
@@ -286,6 +290,34 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     } catch (_) {}
   }
 
+  Future<void> _loadMqttConfig() async {
+    try {
+      final config = await MqttConfigService.fetchMqttConfig(type: 'AC');
+      if (config != null && mounted) {
+        final prefs = await SharedPreferences.getInstance();
+        setState(() {
+          if (prefs.getString('mqtt_host') == null) {
+            _mqttHostController.text = AppConfig.mqttBroker;
+          }
+          if (prefs.getInt('mqtt_port') == null) {
+            _mqttPortController.text = AppConfig.mqttPort.toString();
+          }
+          if (prefs.getString('mqtt_user') == null) {
+            _mqttUserController.text = config.username;
+          }
+          if (prefs.getString('mqtt_pass') == null) {
+            _mqttPassController.text = config.password;
+          }
+          if (prefs.getString('mqtt_topic') == null) {
+            _mqttTopicController.text = config.topic;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading MQTT config: $e');
+    }
+  }
+
   Future<void> _saveWifiStatus(bool connected, {String ip = ""}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -331,6 +363,105 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     } catch (_) {}
   }
 
+  Future<void> _saveLocalDeviceToCache(String ip) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final listJson = prefs.getString('local_provisioned_devices') ?? '[]';
+      final List<dynamic> list = jsonDecode(listJson);
+
+      final mac = _device.address.replaceAll(':', '').toUpperCase();
+      final shortId = mac.length >= 8 ? mac.substring(mac.length - 8) : mac;
+
+      final existingIndex =
+          list.indexWhere((element) => element['mac'] == _device.address);
+
+      final deviceMap = {
+        'id': mac,
+        'name': _device.name ?? 'Smart AC Controller',
+        'mac': _device.address,
+        'shortId': shortId,
+        'systemId': 'local_system',
+        'ip': ip,
+        'ssid': _ssidController.text.trim(),
+        'onOffStatus': {
+          'isOnline': true,
+          'acStatus': 'OFF',
+          'temperature': 24.0,
+          'humidity': 50.0,
+        }
+      };
+
+      if (existingIndex != -1) {
+        list[existingIndex] = deviceMap;
+      } else {
+        list.add(deviceMap);
+      }
+
+      await prefs.setString('local_provisioned_devices', jsonEncode(list));
+      debugPrint('💾 Saved configured Bluetooth device locally: $deviceMap');
+    } catch (e) {
+      debugPrint('⚠️ Error saving local device cache: $e');
+    }
+  }
+
+  void _showWifiConnectedDialog(String ip) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF2D2D44) : Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: const [
+              Icon(Icons.wifi_rounded, color: Colors.green, size: 28),
+              SizedBox(width: 10),
+              Text(
+                "WiFi Connected",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          content: Text(
+            "Device connected to WiFi successfully!\nIP Address: $ip\n\nGo to systems page or stay on configuration?",
+            style: const TextStyle(fontSize: 14),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                // Stay on config page — do nothing
+              },
+              child: const Text(
+                "Cancel",
+                style: TextStyle(
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w500,
+                    fontSize: 15),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _routeToSystemPage();
+              },
+              child: const Text(
+                "OK",
+                style: TextStyle(
+                    color: Colors.green,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   void _startBluetoothStateMonitor() {
     _updateBluetoothState();
     _bluetoothStateTimer?.cancel();
@@ -365,13 +496,6 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       _lastDisconnectTime = time;
     });
     _log("BT disconnected: $reason @ $time");
-
-    // Do not show the reconnect dialog if WiFi is successfully connected
-    if (!_isWifiConnected) {
-      _showReconnectDialog();
-    } else {
-      _log("WiFi is connected. Suppressing Bluetooth reconnect dialog.");
-    }
   }
 
   String _disconnectHint(String reason) {
@@ -453,20 +577,16 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         _showMqttDropdown = true;
       });
       _saveWifiStatus(true, ip: ip);
+      _saveLocalDeviceToCache(ip);
       _hideWifiLoadingDialog();
-      _showSnack("WiFi connected ✅", _green);
-      // auto connect mqtt if values exist
       _sendMqttSettingsToDevice(connect: true);
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) {
-          _routeToSystemPage();
-        }
-      });
+      _showWifiConnectedDialog(ip);
       return;
     }
     if (line.toLowerCase().contains("wifi_failed") ||
         line.toLowerCase().contains("wifi failed")) {
       _hideWifiLoadingDialog();
+
       setState(() {
         _isWifiConnected = false;
         _isConnectingWifi = false;
@@ -478,7 +598,10 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         _mqttStatus = "MQTT not connected";
       });
       _saveWifiStatus(false, ip: "");
-      _showSnack("WiFi connection failed ❌", _red);
+      _showSnack(
+        "WiFi connection failed ❌",
+        _red,
+      );
       return;
     }
 
@@ -501,11 +624,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       });
       _saveWifiStatus(isConn, ip: ip);
       if (isConn) {
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            _routeToSystemPage();
-          }
-        });
+        _saveLocalDeviceToCache(ip);
+        _showWifiConnectedDialog(ip);
       }
       return;
     }
@@ -538,11 +658,8 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
         }
       });
       _saveWifiStatus(true, ip: _wifiIP);
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) {
-          _routeToSystemPage();
-        }
-      });
+      _saveLocalDeviceToCache(_wifiIP);
+      _showWifiConnectedDialog(_wifiIP);
       return;
     }
 
@@ -677,49 +794,65 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
           backgroundColor: _cardBackground,
           title:
               const Text("WiFi Setup", style: TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _ssidController,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: "SSID",
-                  labelStyle: TextStyle(color: Colors.white70),
-                  border: OutlineInputBorder(),
-                  enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white54)),
-                  focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white)),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _wifiPasswordController,
-                obscureText: !passwordVisible,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  labelText: "Password",
-                  labelStyle: const TextStyle(color: Colors.white70),
-                  border: const OutlineInputBorder(),
-                  enabledBorder: const OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white54)),
-                  focusedBorder: const OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white)),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      passwordVisible ? Icons.visibility : Icons.visibility_off,
-                      color: Colors.white70,
-                    ),
-                    onPressed: () {
-                      setDialogState(() {
-                        passwordVisible = !passwordVisible;
-                      });
-                    },
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Primary WiFi ──
+                const Text(
+                  "Primary WiFi",
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _ssidController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: "SSID",
+                    labelStyle: TextStyle(color: Colors.white70),
+                    border: OutlineInputBorder(),
+                    enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white54)),
+                    focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _wifiPasswordController,
+                  obscureText: !passwordVisible,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: "Password",
+                    labelStyle: const TextStyle(color: Colors.white70),
+                    border: const OutlineInputBorder(),
+                    enabledBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white54)),
+                    focusedBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white)),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        passwordVisible
+                            ? Icons.visibility
+                            : Icons.visibility_off,
+                        color: Colors.white70,
+                      ),
+                      onPressed: () {
+                        setDialogState(() {
+                          passwordVisible = !passwordVisible;
+                        });
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -749,7 +882,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       return;
     }
 
-    // Save to local storage
+    // Save primary credentials to local storage
     await LocalCacheService.saveWifiCredentials(ssid, pass);
 
     setState(() {
@@ -758,17 +891,17 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       _isConnectingWifi = true;
     });
 
-    // Send multiple variants to ensure compatibility with different firmware versions
+    // Send primary WiFi credentials
     await _sendCommand("WIFI:$ssid,$pass");
     await Future.delayed(const Duration(milliseconds: 300));
+
     await _sendCommand("WIFI_CONNECT");
     await Future.delayed(const Duration(milliseconds: 300));
     await _sendCommand("WIFI_START");
 
     _showWifiLoadingDialog();
 
-    // Auto-dismiss loading dialog after 30 seconds if no response from device
-    // Extended timeout for slow ESP32 WiFi connections
+    // Auto-dismiss loading dialog after 60 seconds if no response from device
     Future.delayed(const Duration(seconds: 60), () {
       if (_isConnectingWifi && mounted) {
         _hideWifiLoadingDialog();
@@ -1378,7 +1511,7 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(
-        builder: (_) => const MainNavigationPage(initialIndex: 1),
+        builder: (_) => const MainNavigationPage(initialIndex: 0),
       ),
       (_) => false,
     );

@@ -691,4 +691,243 @@ class AdminService {
       debugPrint('❌ [AdminService] deleteSiteAdmin error: $e');
     }
   }
+
+  // ── Systems and System Types ────────────────────────────────────────
+
+  /// Fetch all system types.
+  static Future<List<Map<String, dynamic>>> fetchSystemTypes() async {
+    try {
+      final headers = await _authHeaders();
+      final url = '${AppConfig.provisionBaseUrl}/systemtypes';
+      debugPrint('📡 [AdminService] GET $url');
+
+      final response = await http.get(Uri.parse(url), headers: headers)
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body);
+        final data = body['data'];
+        if (data is List) {
+          return data.cast<Map<String, dynamic>>();
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ [AdminService] fetchSystemTypes error: $e');
+    }
+    return [];
+  }
+
+  /// Create a new system.
+  static Future<Map<String, dynamic>> createSystem(Map<String, dynamic> payload) async {
+    try {
+      final headers = await _authHeaders();
+      final url = '${AppConfig.provisionBaseUrl}/systems';
+      debugPrint('📡 [AdminService] POST $url');
+
+      final response = await http.post(
+        Uri.parse(url),
+        headers: headers,
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 10));
+
+      debugPrint('📡 [AdminService] createSystem response status: ${response.statusCode}');
+
+      final body = jsonDecode(response.body);
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return {
+          'status': 1,
+          'message': body['message'] ?? 'System created successfully',
+          'data': body['data'],
+        };
+      } else {
+        return {
+          'status': 0,
+          'error': body['message'] ?? body['error'] ?? 'Failed to create system',
+        };
+      }
+    } catch (e) {
+      debugPrint('❌ [AdminService] createSystem error: $e');
+      return {'status': 0, 'error': 'Exception: $e'};
+    }
+  }
+
+  /// Fetch all systems for a given company and site.
+  static Future<List<Map<String, dynamic>>> fetchSystems({
+    required String companyId,
+    required String siteId,
+  }) async {
+    try {
+      final headers = await _authHeaders();
+      final url = '${AppConfig.provisionBaseUrl}/systems?companyId=$companyId&siteId=$siteId';
+      debugPrint('📡 [AdminService] GET $url');
+
+      final response = await http.get(Uri.parse(url), headers: headers)
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body);
+        final data = body['data'];
+        if (data is List) {
+          return data.cast<Map<String, dynamic>>();
+        }
+      }
+      debugPrint('⚠️ [AdminService] fetchSystems status: ${response.statusCode}');
+    } catch (e) {
+      debugPrint('❌ [AdminService] fetchSystems error: $e');
+    }
+    return [];
+  }
+
+  /// Fetch all equipment types.
+  static Future<List<Map<String, dynamic>>> fetchEquipmentTypes() async {
+    try {
+      final headers = await _authHeaders();
+      final url = '${AppConfig.provisionBaseUrl}/equipmenttypes';
+      debugPrint('📡 [AdminService] GET $url');
+
+      final response = await http.get(Uri.parse(url), headers: headers)
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body);
+        final data = body['data'];
+        if (data is List) {
+          return data.cast<Map<String, dynamic>>();
+        }
+      }
+      debugPrint('⚠️ [AdminService] fetchEquipmentTypes status: ${response.statusCode}');
+    } catch (e) {
+      debugPrint('❌ [AdminService] fetchEquipmentTypes error: $e');
+    }
+    return [];
+  }
+
+  /// Create a new equipment.
+  static Future<Map<String, dynamic>> createEquipment(Map<String, dynamic> payload) async {
+    try {
+      final headers = await _authHeaders();
+      final url = '${AppConfig.provisionBaseUrl}/equipments';
+      debugPrint('📡 [AdminService] POST $url');
+
+      final response = await http.post(
+        Uri.parse(url),
+        headers: headers,
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 10));
+
+      debugPrint('📡 [AdminService] createEquipment response status: ${response.statusCode}');
+
+      final body = jsonDecode(response.body);
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return {
+          'status': 1,
+          'message': body['message'] ?? 'Equipment created successfully',
+          'data': body['data'],
+        };
+      } else {
+        return {
+          'status': 0,
+          'error': body['message'] ?? body['error'] ?? 'Failed to create equipment',
+        };
+      }
+    } catch (e) {
+      debugPrint('❌ [AdminService] createEquipment error: $e');
+      return {'status': 0, 'error': 'Exception: $e'};
+    }
+  }
+
+  /// Fetch all equipments for a given company and site.
+  static Future<List<Map<String, dynamic>>> fetchEquipments({
+    required String companyId,
+    required String siteId,
+  }) async {
+    try {
+      final headers = await _authHeaders();
+      final url = '${AppConfig.provisionBaseUrl}/equipments?companyId=$companyId&siteId=$siteId';
+      debugPrint('📡 [AdminService] GET $url');
+
+      final response = await http.get(Uri.parse(url), headers: headers)
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body);
+        final data = body['data'];
+        if (data is List) {
+          return data.cast<Map<String, dynamic>>();
+        }
+      }
+      debugPrint('⚠️ [AdminService] fetchEquipments status: ${response.statusCode}');
+    } catch (e) {
+      debugPrint('❌ [AdminService] fetchEquipments error: $e');
+    }
+    return [];
+  }
+
+  /// Update an equipment.
+  static Future<Map<String, dynamic>> updateEquipment(String equipmentId, Map<String, dynamic> payload) async {
+    try {
+      final headers = await _authHeaders();
+      final url = '${AppConfig.provisionBaseUrl}/equipments/$equipmentId';
+      debugPrint('📡 [AdminService] PUT $url');
+
+      final response = await http.put(
+        Uri.parse(url),
+        headers: headers,
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 10));
+
+      debugPrint('📡 [AdminService] updateEquipment response status: ${response.statusCode}');
+
+      final body = jsonDecode(response.body);
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return {
+          'status': 1,
+          'message': body['message'] ?? 'Equipment updated successfully',
+          'data': body['data'],
+        };
+      } else {
+        return {
+          'status': 0,
+          'error': body['message'] ?? body['error'] ?? 'Failed to update equipment',
+        };
+      }
+    } catch (e) {
+      debugPrint('❌ [AdminService] updateEquipment error: $e');
+      return {'status': 0, 'error': 'Exception: $e'};
+    }
+  }
+
+  /// Update an existing system.
+  static Future<Map<String, dynamic>> updateSystem(String systemId, Map<String, dynamic> payload) async {
+    try {
+      final headers = await _authHeaders();
+      final url = '${AppConfig.provisionBaseUrl}/systems/$systemId';
+      debugPrint('📡 [AdminService] PUT $url');
+
+      final response = await http.put(
+        Uri.parse(url),
+        headers: headers,
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 10));
+
+      debugPrint('📡 [AdminService] updateSystem response status: ${response.statusCode}');
+
+      final body = jsonDecode(response.body);
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return {
+          'status': 1,
+          'message': body['message'] ?? 'System updated successfully',
+          'data': body['data'],
+        };
+      } else {
+        return {
+          'status': 0,
+          'error': body['message'] ?? body['error'] ?? 'Failed to update system',
+        };
+      }
+    } catch (e) {
+      debugPrint('❌ [AdminService] updateSystem error: $e');
+      return {'status': 0, 'error': 'Exception: $e'};
+    }
+  }
 }

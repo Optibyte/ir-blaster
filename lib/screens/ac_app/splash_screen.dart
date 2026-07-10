@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:animate_do/animate_do.dart';
+import 'package:ir_blaster_ac/core/constants/colors.dart';
 
 class ACSplashScreen extends StatefulWidget {
   const ACSplashScreen({super.key});
@@ -19,10 +20,10 @@ class _ACSplashScreenState extends State<ACSplashScreen>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2000),
+      duration: const Duration(milliseconds: 2500),
     )..repeat(reverse: true);
 
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.05).animate(
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.06).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
     );
   }
@@ -36,10 +37,10 @@ class _ACSplashScreenState extends State<ACSplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF060912), // Even deeper navy
+      backgroundColor: const Color(0xFF0A1A14),
       body: Stack(
         children: [
-          // Background Gradient with Animated Glow
+          // Background radial gradient with Forest Green glow
           Positioned.fill(
             child: AnimatedBuilder(
               animation: _controller,
@@ -48,10 +49,10 @@ class _ACSplashScreenState extends State<ACSplashScreen>
                   decoration: BoxDecoration(
                     gradient: RadialGradient(
                       center: Alignment.center,
-                      radius: 1.5 + (_controller.value * 0.2),
-                      colors: const [
-                        Color(0xFF161B33),
-                        Color(0xFF060912),
+                      radius: 1.4 + (_controller.value * 0.2),
+                      colors: [
+                        AppColors.primary.withValues(alpha: 0.08),
+                        const Color(0xFF0A1A14),
                       ],
                     ),
                   ),
@@ -60,20 +61,35 @@ class _ACSplashScreenState extends State<ACSplashScreen>
             ),
           ),
 
-          // Subtle Floating Particles Effect (Conceptual via Containers)
-          ...List.generate(5, (index) {
+          // Floating eco particles
+          ...List.generate(6, (index) {
+            final positions = [
+              const Offset(40, 150),
+              const Offset(280, 200),
+              const Offset(120, 400),
+              const Offset(300, 500),
+              const Offset(60, 600),
+              const Offset(250, 300),
+            ];
             return Positioned(
-              top: 100.0 * (index + 1),
-              left: 50.0 * (index * 2),
+              top: positions[index].dy,
+              left: positions[index].dx,
               child: FadeIn(
-                delay: Duration(milliseconds: 500 * index),
+                delay: Duration(milliseconds: 400 * index),
                 duration: const Duration(seconds: 3),
                 child: Container(
-                  width: 2,
-                  height: 2,
+                  width: 3,
+                  height: 3,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF6CC042).withOpacity(0.2),
+                    color: AppColors.primaryLight.withValues(alpha: 0.15 + (index * 0.03)),
                     shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primary.withValues(alpha: 0.2),
+                        blurRadius: 8,
+                        spreadRadius: 1,
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -85,80 +101,112 @@ class _ACSplashScreenState extends State<ACSplashScreen>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo with sophisticated, smooth animation (ZoomIn is lag-free)
+                // Logo with pulse animation
                 ZoomIn(
-                  duration: const Duration(milliseconds: 1500),
+                  duration: const Duration(milliseconds: 1200),
                   child: ScaleTransition(
                     scale: _pulseAnimation,
                     child: Hero(
                       tag: 'app_logo',
                       child: Container(
-                        padding: const EdgeInsets.all(20),
+                        padding: const EdgeInsets.all(24),
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF6CC042).withOpacity(0.1),
-                              blurRadius: 40,
-                              spreadRadius: 10,
+                              color: AppColors.primary.withValues(alpha: 0.15),
+                              blurRadius: 60,
+                              spreadRadius: 20,
                             ),
                           ],
                         ),
                         child: Image.asset(
                           'assets/images/logo.png',
-                          width: 120, // Reduced from 180 to fit completely
+                          width: 100,
                           errorBuilder: (context, error, stackTrace) {
-                            return const SizedBox
-                                .shrink(); // Remove the generic icon
+                            return Container(
+                              width: 100,
+                              height: 100,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    AppColors.primary,
+                                    AppColors.primaryLight,
+                                  ],
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.settings_remote_rounded,
+                                color: Colors.white,
+                                size: 48,
+                              ),
+                            );
                           },
                         ),
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(height: 40),
+                const SizedBox(height: 48),
 
-                // Branding text with smooth fade up (no layout thrashing)
+                // Brand name
+                FadeInUp(
+                  duration: const Duration(milliseconds: 1000),
+                  delay: const Duration(milliseconds: 600),
+                  child: Text(
+                    'SMART CONTROL',
+                    style: GoogleFonts.outfit(
+                      color: Colors.white,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 6.0,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
                 FadeInUp(
                   duration: const Duration(milliseconds: 1000),
                   delay: const Duration(milliseconds: 800),
                   child: Text(
-                    'IR BLASTER AC',
-                    style: GoogleFonts.inter(
-                      color: Colors.white,
-                      fontSize: 28, // Slightly reduced to fit longer name
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 8.0, // Fixed letter spacing prevents layout lag
+                    'HUB',
+                    style: GoogleFonts.outfit(
+                      color: AppColors.primaryLight,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 12.0,
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
 
-                // Animated Divider
+                // Animated accent line
                 FadeIn(
-                  delay: const Duration(milliseconds: 1500),
+                  delay: const Duration(milliseconds: 1200),
                   child: Container(
-                    width: 40,
+                    width: 48,
                     height: 3,
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                        colors: [Color(0xFF6CC042), Color(0xFF4CAF50)],
+                        colors: [AppColors.primary, AppColors.accent],
                       ),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
 
-                // Tagline with Slide effect
+                // Tagline
                 FadeInUp(
-                  delay: const Duration(milliseconds: 1800),
+                  delay: const Duration(milliseconds: 1500),
                   child: Text(
-                    'SMART AC CONTROL',
+                    'MANAGE YOUR CLIMATE GRID',
                     style: GoogleFonts.inter(
-                      color: const Color(0xFF6CC042).withOpacity(0.8),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+                      color: AppColors.primaryLight.withValues(alpha: 0.6),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
                       letterSpacing: 3,
                     ),
                   ),
@@ -167,7 +215,7 @@ class _ACSplashScreenState extends State<ACSplashScreen>
             ),
           ),
 
-          // Bottom Loading Indicator
+          // Bottom loading indicator
           Positioned(
             bottom: 60,
             left: 0,
@@ -180,9 +228,9 @@ class _ACSplashScreenState extends State<ACSplashScreen>
                     SizedBox(
                       width: 40,
                       child: LinearProgressIndicator(
-                        backgroundColor: Colors.white.withOpacity(0.05),
+                        backgroundColor: Colors.white.withValues(alpha: 0.05),
                         valueColor: const AlwaysStoppedAnimation<Color>(
-                            const Color(0xFF6CC042)),
+                            AppColors.primary),
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
@@ -190,7 +238,7 @@ class _ACSplashScreenState extends State<ACSplashScreen>
                     Text(
                       'CONNECTING TO SYSTEM',
                       style: GoogleFonts.inter(
-                        color: Colors.white.withOpacity(0.3),
+                        color: Colors.white.withValues(alpha: 0.25),
                         fontSize: 10,
                         fontWeight: FontWeight.w400,
                         letterSpacing: 2,

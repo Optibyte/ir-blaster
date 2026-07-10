@@ -508,7 +508,6 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   Future<void> _fetchEquipments() async {
     final companyId = await AuthService.getCompanyId() ?? '';
     final siteId = await AuthService.getSiteId() ?? '';
-    final bucket = await AuthService.getBucket() ?? '';
     final token = await AuthService.getCookieHeader() ?? '';
 
     final queryParams = <String>[];
@@ -520,13 +519,15 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     }
     final queryString = queryParams.isNotEmpty ? '?${queryParams.join('&')}' : '';
     final url =
-        '${AppConfig.provisionBaseUrl}/equipments/ac/by-company$queryString';
+        '${AppConfig.provisionBaseUrl}/equipments$queryString';
 
+    bool fetchSuccess = false;
     try {
       final response = await http.get(
         Uri.parse(url),
         headers: {
           'Authorization': 'Bearer $token',
+          'Cookie': 'auth_token=$token',
           'Content-Type': 'application/json',
         },
       );
@@ -543,19 +544,52 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
           if (mounted && filteredList.isNotEmpty) {
             _applyEquipmentData(filteredList);
+            fetchSuccess = true;
             return;
           }
         }
       }
-
-      if (mounted) {
-        setState(() => _isLoadingEquipments = false);
-      }
     } catch (e) {
       debugPrint('Error fetching equipments: $e');
-      if (mounted) {
-        setState(() => _isLoadingEquipments = false);
+    }
+
+    if (!fetchSuccess && widget.systemId.isNotEmpty) {
+      debugPrint('🔄 Falling back to systems/equipment endpoint for system: ${widget.systemId}');
+      try {
+        final fallbackUrl = '${AppConfig.provisionBaseUrl}/systems/equipment/${widget.systemId}'
+            '?companyId=$companyId&siteId=$siteId';
+            
+        final response = await http.get(
+          Uri.parse(fallbackUrl),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Cookie': 'auth_token=$token',
+            'Content-Type': 'application/json',
+          },
+        ).timeout(const Duration(seconds: 4));
+        
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          final dynamic listData = data['data'];
+          if (listData != null && listData is List) {
+            final List<dynamic> filteredList = listData.where((e) {
+              final sysId = (e['systemId'] ?? e['SystemId'] ?? '').toString();
+              return sysId.toLowerCase() == widget.systemId.toLowerCase() || sysId.isEmpty;
+            }).toList();
+            if (mounted && filteredList.isNotEmpty) {
+              _applyEquipmentData(filteredList);
+              fetchSuccess = true;
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('Error in fallback equipments fetch: $e');
       }
+    }
+
+    if (mounted) {
+      setState(() => _isLoadingEquipments = false);
     }
   }
 
@@ -604,8 +638,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       });
 
       if (deviceId.isNotEmpty) {
-        // HTTP Stream disabled to fix lag - all telemetry is now handled via direct MQTT
-        // _connectToStream(imei);
+        // Telemetry is now handled via the SSE stream initialized in _setupPersistentMqtt()
       } else {
         setState(() => _isTelemetryLoading = false);
       }
@@ -627,6 +660,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         Uri.parse(configUrl),
         headers: {
           'Authorization': 'Bearer $token',
+          'Cookie': 'auth_token=$token',
           'Content-Type': 'application/json',
         },
       );
@@ -655,7 +689,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       _messenger?.showSnackBar(
         SnackBar(
           content: Text(
-              'Power ${value ? 'ON' : 'OFF'} for Device: ${_deviceId.isEmpty ? 'testir' : _deviceId}'),
+              'Power ${value ? 'ON' : 'OFF'} for Device: ${_deviceId.isEmpty ? AppConfig.mqttDeviceId : _deviceId}'),
           backgroundColor: value ? Colors.green : Colors.redAccent,
           behavior: SnackBarBehavior.floating,
         ),
@@ -666,10 +700,15 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
   bool _isConnectingMqtt = false;
 
   Future<void> _setupPersistentMqtt() async {
+    // Start SSE stream listener immediately for getting data details
+    if (_subscribedDeviceId != _deviceId) {
+      _subscribedDeviceId = _deviceId;
+      _connectToStream(_deviceId, "");
+    }
+
     if (_isConnectingMqtt) return;
     if (_persistentMqttClient?.connectionStatus?.state ==
-            MqttConnectionState.connected &&
-        _subscribedDeviceId == _deviceId) {
+            MqttConnectionState.connected) {
       return;
     }
 
@@ -682,7 +721,6 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     _isConnectingMqtt = true;
 
     final String broker = AppConfig.mqttBroker;
-    final String topic = AppConfig.mqttTopic;
     final String username = AppConfig.mqttUsername;
     final String password = AppConfig.mqttPassword;
 
@@ -704,36 +742,18 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     _persistentMqttClient!.connectionMessage = connMessage;
 
     try {
-      debugPrint('📡 [MQTT Live] Connecting...');
+      debugPrint('📡 [MQTT Live] Connecting (Publish Only)...');
       await _persistentMqttClient!.connect();
       _isConnectingMqtt = false;
       if (_persistentMqttClient!.connectionStatus!.state ==
           MqttConnectionState.connected) {
-        final statusTopic = _getDeviceTopic('status');
-        final onlineTopic = _getDeviceTopic('online');
         debugPrint(
-            '✅ [MQTT Live] Connected. Subscribing to $statusTopic and $onlineTopic');
-        _persistentMqttClient!.subscribe('testir', MqttQos.atLeastOnce);
-        _persistentMqttClient!.subscribe('testir/#', MqttQos.atLeastOnce);
-        _persistentMqttClient!.subscribe('Test_ir', MqttQos.atLeastOnce);
-        _persistentMqttClient!.subscribe('Test_ir/#', MqttQos.atLeastOnce);
-        _persistentMqttClient!.subscribe(statusTopic, MqttQos.atLeastOnce);
-        _persistentMqttClient!.subscribe(onlineTopic, MqttQos.atLeastOnce);
-        _subscribedDeviceId = _deviceId;
-
-        _persistentMqttClient!.updates!
-            .listen((List<MqttReceivedMessage<MqttMessage?>>? c) {
-          final recMess = c![0].payload as MqttPublishMessage;
-          final String topic = c![0].topic;
-          final pt =
-              MqttPublishPayload.bytesToStringAsString(recMess.payload.message);
-          _handleMqttTelemetry(topic, pt);
-        });
+            '✅ [MQTT Live] Connected (Publish Only). Telemetry is retrieved via SSE Stream.');
       }
     } catch (e) {
       _isConnectingMqtt = false;
-      debugPrint('? [MQTT Live] Connection Error: $e');
-      Future.delayed(const Duration(seconds: 3), () => _setupPersistentMqtt());
+      debugPrint('⚠️ [MQTT Live] Connection Error: $e');
+      Future.delayed(const Duration(seconds: 5), () => _setupPersistentMqtt());
     }
   }
 
@@ -768,11 +788,11 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         // Activation logic:
         // 1. Matches specific device topic
         // 2. Matches current device ID (IMEI/ShortId)
-        // 3. Matches legacy/default 'Sustainabyte_testir' ID
+        // 3. Matches legacy/default fallback ID
         final bool isMatchingDevice = isStatusTopic ||
             (incomingDeviceId.isNotEmpty &&
                 incomingDeviceId.toLowerCase() == _deviceId.toLowerCase()) ||
-            incomingDeviceId == 'Sustainabyte_testir';
+            incomingDeviceId == AppConfig.mqttDeviceId;
 
         if (isMatchingDevice) {
           // Dynamically bind to the physical device ID if they differ
@@ -816,11 +836,11 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
               .trim()
               .toUpperCase();
           final bool wasOnline = _isOnline;
-          if (jsonStatus == 'ACTIVE') {
+          if (jsonStatus == 'ACTIVE' || jsonStatus == 'ON' || jsonStatus == 'OFF') {
             _isOnline = true;
             _inactiveStartTime = null;
             debugPrint(
-                '📡 [MQTT status topic JSON] Status ACTIVE received -> WiFi ON');
+                '📡 [MQTT status topic JSON] Status $jsonStatus received -> WiFi ON');
           } else {
             _isOnline = false;
             if (wasOnline) {
@@ -1033,7 +1053,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       final bool isTargetDeviceMessage = isStatusTopic ||
           isOnlineTopic ||
           (payload.contains(_deviceId) && _deviceId.isNotEmpty) ||
-          payload.contains('Sustainabyte_testir');
+          payload.contains(AppConfig.mqttDeviceId);
 
       if (isTargetDeviceMessage) {
         _lastMessageReceivedTime = DateTime.now();
@@ -1172,8 +1192,8 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
   String _getDeviceTopic(String type) {
     // Dynamically construct topic based on the selected device ID (IMEI/ShortId)
-    // Fallback to Sustainabyte_testir for compatibility with legacy hardware
-    final String id = _deviceId.isEmpty ? 'Sustainabyte_testir' : _deviceId;
+    // Fallback to mqttDeviceId for compatibility with legacy hardware
+    final String id = _deviceId.isEmpty ? AppConfig.mqttDeviceId : _deviceId;
     if (type == 'control') {
       return AppConfig.getMqttControlTopic(id);
     } else if (type == 'schedule') {
@@ -1184,7 +1204,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
       return AppConfig.getMqttTempTopic(id);
     }
     // Fallback for online or other types
-    return 'Test_ir/$id/$type';
+    return '${AppConfig.mqttTopic}/$id/$type';
   }
 
   Future<void> _publishMqttCommand(String message,
@@ -1273,6 +1293,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         Uri.parse(url),
         headers: {
           'Authorization': 'Bearer $token',
+          'Cookie': 'auth_token=$token',
           'Content-Type': 'application/json',
         },
       );
@@ -1308,22 +1329,33 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
     return '';
   }
 
-  Future<void> _connectToStream(String imei) async {
+  Future<void> _connectToStream(String deviceId, String imei) async {
+    _subscription?.cancel();
+    _subscription = null;
+
     final companyId = await AuthService.getCompanyId() ?? '';
     final token = await AuthService.getCookieHeader() ?? '';
 
-    // The error "not upgraded to websocket" suggests this is an HTTP Stream (SSE/NDJSON)
-    // rather than a true WebSocket. We will use http.Client to listen to the stream.
-    final url =
-        '${AppConfig.provisionBaseUrl}/mqtt/stream?companyid=$companyId&deviceId=$imei';
+    final queryParams = <String>[];
+    if (companyId.isNotEmpty) {
+      queryParams.add('companyid=$companyId');
+    }
+    if (deviceId.isNotEmpty) {
+      queryParams.add('deviceId=$deviceId');
+    }
+    if (imei.isNotEmpty) {
+      queryParams.add('imei=$imei');
+    }
+    final url = '${AppConfig.provisionBaseUrl}/mqtt/stream?${queryParams.join('&')}';
 
-    debugPrint('ðŸŒ  [HTTP Stream] Connecting to: $url');
+    debugPrint('📡 [HTTP Stream] Connecting to: $url');
 
     try {
       final client = http.Client();
       final request = http.Request('GET', Uri.parse(url));
       request.headers['Authorization'] = 'Bearer $token';
-      request.headers['Accept'] = 'text/event-stream'; // Standard for SSE
+      request.headers['Cookie'] = 'auth_token=$token';
+      request.headers['Accept'] = 'text/event-stream';
 
       final response = await client.send(request);
 
@@ -1333,36 +1365,52 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         }
         _subscription = response.stream
             .transform(utf8.decoder)
-            .transform(const LineSplitter()) // Handle line-by-line JSON
+            .transform(const LineSplitter())
             .listen(
           (line) {
             if (line.trim().isEmpty) return;
-            debugPrint('ðŸ“¥ [HTTP Stream] Data: $line');
+            debugPrint('📥 [HTTP Stream] Data: $line');
             _parseAndMapData(line);
           },
           onError: (error) {
-            debugPrint('â Œ [HTTP Stream] Error: $error');
+            debugPrint('❌ [HTTP Stream] Error: $error');
+            Future.delayed(const Duration(seconds: 3), () {
+              if (mounted && _deviceId == deviceId) {
+                _connectToStream(deviceId, imei);
+              }
+            });
           },
           onDone: () {
-            debugPrint('ðŸ”Œ [HTTP Stream] Stream closed');
+            debugPrint('🔌 [HTTP Stream] Stream closed');
             client.close();
+            Future.delayed(const Duration(seconds: 3), () {
+              if (mounted && _deviceId == deviceId) {
+                _connectToStream(deviceId, imei);
+              }
+            });
           },
         );
-
-        // Background polling removed as per user request to stop continuous MQTT traffic.
-        _pollTimer?.cancel();
       } else {
-        debugPrint(
-            'â Œ [HTTP Stream] Connection failed: ${response.statusCode}');
+        debugPrint('❌ [HTTP Stream] Connection failed: ${response.statusCode}');
         if (mounted) {
           setState(() => _isTelemetryLoading = false);
         }
+        Future.delayed(const Duration(seconds: 5), () {
+          if (mounted && _deviceId == deviceId) {
+            _connectToStream(deviceId, imei);
+          }
+        });
       }
     } catch (e) {
-      debugPrint('â Œ [HTTP Stream] Connection Exception: $e');
+      debugPrint('❌ [HTTP Stream] Connection Exception: $e');
       if (mounted) {
         setState(() => _isTelemetryLoading = false);
       }
+      Future.delayed(const Duration(seconds: 5), () {
+        if (mounted && _deviceId == deviceId) {
+          _connectToStream(deviceId, imei);
+        }
+      });
     }
   }
 
@@ -1380,6 +1428,17 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
       // 1. Decode JSON
       final data = jsonDecode(jsonStr);
+
+      // Check if this is a stream control/connection handshake message (no telemetry data payload)
+      if (data['data'] == null && (data['message'] != null || data['cacheStatus'] != null)) {
+        debugPrint('ℹ️ [HTTP Stream] Control Message: ${data['message']} | Cache: ${data['cacheStatus']}');
+        // Do NOT set _isOnline = false here. The SSE handshake message is just a stream
+        // control message and does not reflect the physical device's WiFi/online state.
+        // Online status is exclusively driven by actual telemetry data (status field)
+        // and the 30-second watchdog timer.
+        return;
+      }
+
       Map<String, dynamic>? payload;
 
       if (data['data'] != null && data['data']['data'] != null) {
@@ -1390,9 +1449,36 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
 
       if (payload != null && mounted) {
         bool hasChanges = false;
+        _lastMessageReceivedTime = DateTime.now();
 
-        // Temperature and Humidity parsing removed from stream as per request.
-        // They are now handled via persistent MQTT subscription in _handleMqttTelemetry.
+        // Restore parsing of temperature, humidity, wifi, schedules, and active status
+        // from the stream API as requested by the user.
+        double newActualTemperature = _actualTemperature;
+        if (payload['temp'] != null || payload['current_temp'] != null || payload['currentTemp'] != null) {
+          final val = payload['temp'] ?? payload['current_temp'] ?? payload['currentTemp'];
+          if (val is num) {
+            newActualTemperature = val.toDouble();
+            if (newActualTemperature != _actualTemperature) hasChanges = true;
+          }
+        }
+
+        double newSetTemperature = _setTemperature;
+        if (payload['set_temp'] != null || payload['setTemp'] != null) {
+          final val = payload['set_temp'] ?? payload['setTemp'];
+          if (val is num) {
+            newSetTemperature = val.toDouble();
+            if (newSetTemperature != _setTemperature) hasChanges = true;
+          }
+        }
+
+        int newHumidity = _humidity;
+        if (payload['hum'] != null || payload['humidity'] != null) {
+          final val = payload['hum'] ?? payload['humidity'];
+          if (val is num) {
+            newHumidity = val.toInt();
+            if (newHumidity != _humidity) hasChanges = true;
+          }
+        }
 
         bool newPowerOn = _isPowerOn;
         if ((payload['ac'] != null || payload['ACStatus'] != null) &&
@@ -1402,9 +1488,35 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
           if (newPowerOn != _isPowerOn) hasChanges = true;
         }
 
-        // Connection status updates from HTTP Stream disabled.
-        // All status logic is now centralized in _handleMqttTelemetry for consistency.
+        // Connection status updates from HTTP Stream
         bool newOnline = _isOnline;
+        final String jsonStatus = (payload['status'] ?? data['status'] ?? '').toString().trim().toUpperCase();
+        if (jsonStatus.isNotEmpty) {
+          newOnline = (jsonStatus == 'ACTIVE' || jsonStatus == 'ON' || jsonStatus == 'OFF');
+          if (newOnline != _isOnline) {
+            hasChanges = true;
+          }
+        }
+
+        if (payload['wifiSsid'] != null || payload['wifi_ssid'] != null) {
+          final ssid = (payload['wifiSsid'] ?? payload['wifi_ssid']).toString();
+          if (ssid.isNotEmpty && ssid != _savedSsid) {
+            _savedSsid = ssid;
+            hasChanges = true;
+          }
+        }
+
+        // Schedules
+        if (payload['sch_on1'] != null) _scheduleOn1 = payload['sch_on1'].toString();
+        if (payload['sch_off1'] != null) _scheduleOff1 = payload['sch_off1'].toString();
+        if (payload['sch_on2'] != null) _scheduleOn2 = payload['sch_on2'].toString();
+        if (payload['sch_off2'] != null) _scheduleOff2 = payload['sch_off2'].toString();
+        if (payload['sch_on3'] != null) _scheduleOn3 = payload['sch_on3'].toString();
+        if (payload['sch_off3'] != null) _scheduleOff3 = payload['sch_off3'].toString();
+        if (payload['sch_on4'] != null) _scheduleOn4 = payload['sch_on4'].toString();
+        if (payload['sch_off4'] != null) _scheduleOff4 = payload['sch_off4'].toString();
+        if (payload['sch_on5'] != null) _scheduleOn5 = payload['sch_on5'].toString();
+        if (payload['sch_off5'] != null) _scheduleOff5 = payload['sch_off5'].toString();
 
         bool newAuto = _isAuto;
         if (payload['auto'] != null || payload['isAuto'] != null) {
@@ -1415,6 +1527,9 @@ class _DeviceDetailPageState extends State<DeviceDetailPage>
         if (mounted) {
           setState(() {
             _isTelemetryLoading = false;
+            _actualTemperature = newActualTemperature;
+            _setTemperature = newSetTemperature;
+            _humidity = newHumidity;
 
             if (hasChanges) {
               if (!_isPowerCommandLock) _isPowerOn = newPowerOn;
@@ -3656,7 +3771,10 @@ class _TrendsPageState extends State<_TrendsPage>
     try {
       final response = await http.get(
         Uri.parse(url),
-        headers: {'Authorization': 'Bearer $token'},
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Cookie': 'auth_token=$token',
+        },
       );
       debugPrint('ðŸ“¥ RESPONSE STATUS: ${response.statusCode}');
       debugPrint('ðŸ“¦ RESPONSE BODY: ${response.body}');
@@ -3724,7 +3842,10 @@ class _TrendsPageState extends State<_TrendsPage>
     try {
       final response = await http.get(
         Uri.parse(url),
-        headers: {'Authorization': 'Bearer $token'},
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Cookie': 'auth_token=$token',
+        },
       );
       debugPrint('ðŸ“Š CHART STATUS: ${response.statusCode}');
 

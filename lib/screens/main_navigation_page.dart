@@ -7,7 +7,8 @@ import 'package:ir_blaster_ac/screens/ac_app/device_detail_page.dart';
 import 'package:ir_blaster_ac/widgets/top_navbar.dart';
 
 class MainNavigationPage extends StatefulWidget {
-  const MainNavigationPage({super.key});
+  final int initialIndex;
+  const MainNavigationPage({super.key, this.initialIndex = 0});
 
   @override
   State<MainNavigationPage> createState() => _MainNavigationPageState();
@@ -21,7 +22,8 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(initialPage: 0);
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: _currentIndex);
   }
 
   @override

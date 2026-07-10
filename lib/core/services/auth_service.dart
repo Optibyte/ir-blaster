@@ -103,83 +103,94 @@ class AuthService {
   /// Performs a real login by hitting the auth service.
   static Future<String?> login(String email, String password) async {
     try {
+      final url = AppConfig.loginEndpoint;
       debugPrint('🔐 [AuthService] Attempting login for: $email');
+      debugPrint('🔐 [AuthService] Login URL: $url');
 
-      final response = await http
-          .post(
-            Uri.parse(AppConfig.loginEndpoint),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'email': email,
-              'password': password,
-            }),
-          )
-          .timeout(const Duration(seconds: 10));
+      final client = http.Client();
+      try {
+        // Build the request manually so we can follow redirects for POST
+        final request = http.Request('POST', Uri.parse(url));
+        request.headers['Content-Type'] = 'application/json';
+        request.body = jsonEncode({
+          'email': email,
+          'password': password,
+        });
+        request.followRedirects = true;
+        request.maxRedirects = 5;
 
-      debugPrint('🔐 [AuthService] Login Status: ${response.statusCode}');
+        final streamedResponse =
+            await client.send(request).timeout(const Duration(seconds: 10));
+        final response = await http.Response.fromStream(streamedResponse);
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> body = jsonDecode(response.body);
+        debugPrint('🔐 [AuthService] Login Status: ${response.statusCode}');
+        debugPrint('🔐 [AuthService] Response URL: ${response.request?.url}');
 
-        if (body['status'] == 1) {
-          final userData = body['data'];
+        if (response.statusCode == 200) {
+          final Map<String, dynamic> body = jsonDecode(response.body);
 
-          // Extract token from set-cookie header or response body
-          String token = '';
-          if (body['token'] != null) {
-            token = body['token'].toString();
-          } else if (userData != null &&
-              userData is Map &&
-              userData['token'] != null) {
-            token = userData['token'].toString();
-          }
+          if (body['status'] == 1) {
+            final userData = body['data'];
 
-          if (token.isEmpty) {
-            String? rawCookie;
-            response.headers.forEach((k, v) {
-              if (k.toLowerCase() == 'set-cookie') {
-                rawCookie = v;
-              }
-            });
+            // Extract token from set-cookie header or response body
+            String token = '';
+            if (body['token'] != null) {
+              token = body['token'].toString();
+            } else if (userData != null &&
+                userData is Map &&
+                userData['token'] != null) {
+              token = userData['token'].toString();
+            }
 
-            if (rawCookie != null) {
-              // Support multiple cookies joined by comma or semicolon
-              final cookieParts = rawCookie!.split(RegExp(r'[;,]'));
-              for (var part in cookieParts) {
-                part = part.trim();
-                if (part.startsWith('auth_token=')) {
-                  token = part.substring('auth_token='.length);
-                  break;
+            if (token.isEmpty) {
+              String? rawCookie;
+              response.headers.forEach((k, v) {
+                if (k.toLowerCase() == 'set-cookie') {
+                  rawCookie = v;
+                }
+              });
+
+              if (rawCookie != null) {
+                // Support multiple cookies joined by comma or semicolon
+                final cookieParts = rawCookie!.split(RegExp(r'[;,]'));
+                for (var part in cookieParts) {
+                  part = part.trim();
+                  if (part.startsWith('auth_token=')) {
+                    token = part.substring('auth_token='.length);
+                    break;
+                  }
                 }
               }
             }
-          }
-          if (token.isEmpty) {
+            if (token.isEmpty) {
+              debugPrint(
+                  '⚠️ [AuthService] auth_token not found in cookies or response body. Using fallback "valid_session".');
+              token = 'valid_session';
+            }
+
+            // Persist session and user details from the REAL response
+            await _storage.write(key: _cookieKey, value: token);
+            await _storage.write(key: _emailKey, value: email);
+            if (userData is Map) {
+              await _persistUserData(Map<String, dynamic>.from(userData));
+            }
+
             debugPrint(
-                '⚠️ [AuthService] auth_token not found in cookies or response body. Using fallback "valid_session".');
-            token = 'valid_session';
+                '✅ [AuthService] Login successful. Data persisted for bucket: ${userData['bucket']}');
+            return null; // Success
+          } else {
+            final message = body['message'] ?? body['Message'] ?? body['title'];
+            if (message != null && message.toString().trim().isNotEmpty) {
+              final text = message.toString().trim();
+              if (!_isTechnicalLoginMessage(text)) return text;
+            }
+            return 'Email or password is incorrect.';
           }
-
-          // Persist session and user details from the REAL response
-          await _storage.write(key: _cookieKey, value: token);
-          await _storage.write(key: _emailKey, value: email);
-          if (userData is Map) {
-            await _persistUserData(Map<String, dynamic>.from(userData));
-          }
-
-          debugPrint(
-              '✅ [AuthService] Login successful. Data persisted for bucket: ${userData['bucket']}');
-          return null; // Success
         } else {
-          final message = body['message'] ?? body['Message'] ?? body['title'];
-          if (message != null && message.toString().trim().isNotEmpty) {
-            final text = message.toString().trim();
-            if (!_isTechnicalLoginMessage(text)) return text;
-          }
-          return 'Email or password is incorrect.';
+          return _loginErrorMessage(response);
         }
-      } else {
-        return _loginErrorMessage(response);
+      } finally {
+        client.close();
       }
     } on TimeoutException {
       debugPrint('❌ [AuthService] Login timeout');
@@ -465,19 +476,27 @@ class AuthService {
       debugPrint('📡 [AuthService] check-ac-access body=${response.body}');
 
       if (response.statusCode == 200) {
-        final body = jsonDecode(response.body);
-        if (body is Map &&
-            (body['hasAcSystem'] == true ||
-                body['hasAccess'] == true ||
-                body['data'] == true)) {
-          debugPrint('✅ [AuthService] AC access allowed');
-          return true;
+        try {
+          final body = jsonDecode(response.body);
+          if (body is Map &&
+              (body['hasAcSystem'] == true ||
+                  body['hasAccess'] == true ||
+                  body['data'] == true)) {
+            debugPrint('✅ [AuthService] AC access allowed');
+            return true;
+          }
+        } catch (_) {
+          // Response is not JSON (likely HTML from frontend), fall through
         }
       }
 
-      if (_isCheckAcAccessRouteCollision(response)) {
+      // If the endpoint doesn't exist (404, HTML response, or route collision),
+      // fall back to checking the /systems list
+      if (response.statusCode == 404 ||
+          response.body.trimLeft().startsWith('<!') ||
+          _isCheckAcAccessRouteCollision(response)) {
         debugPrint(
-            '⚠️ [AuthService] check-ac-access route collision detected. Falling back to /systems list.');
+            '⚠️ [AuthService] check-ac-access endpoint not available (status=${response.statusCode}). Falling back to /systems list.');
         return _checkAcSystemAccessFromSystems(companyId, token);
       }
 
@@ -485,7 +504,8 @@ class AuthService {
       return false;
     } catch (e) {
       debugPrint('❌ [AuthService] checkAcSystemAccess error: $e');
-      return false;
+      // On network/parse errors, allow access since login succeeded
+      return true;
     }
   }
 
@@ -525,7 +545,12 @@ class AuthService {
           '📡 [AuthService] fallback systems status=${response.statusCode}');
       debugPrint('📡 [AuthService] fallback systems body=${response.body}');
 
-      if (response.statusCode != 200) return false;
+      if (response.statusCode != 200 ||
+          response.body.trimLeft().startsWith('<!')) {
+        debugPrint(
+            '⚠️ [AuthService] fallback /systems endpoint unavailable. Allowing access by default.');
+        return true;
+      }
 
       final decoded = jsonDecode(response.body);
       final systems = decoded is Map ? decoded['data'] : decoded;

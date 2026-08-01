@@ -11,7 +11,6 @@ import 'package:ir_blaster_ac/core/services/auth_service.dart' as ac_auth;
 import 'package:ir_blaster_ac/screens/ac_app/sigin.dart';
 import 'package:ir_blaster_ac/screens/main_navigation_page.dart';
 import 'package:ir_blaster_ac/screens/ac_app/splash_screen.dart';
-import 'package:ir_blaster_ac/screens/ac_app/admin_panel_page.dart';
 import 'package:ir_blaster_ac/screens/ac_app/platform_admin_page.dart';
 import 'package:ir_blaster_ac/screens/ac_app/company_sites_page.dart';
 import 'package:ir_blaster_ac/screens/ac_app/company_admin_page.dart';
@@ -51,6 +50,7 @@ class MainApp extends StatelessWidget {
     final themeProvider = Provider.of<ThemeProvider>(context);
 
     return MaterialApp(
+      navigatorKey: ac_auth.AuthService.navigatorKey,
       debugShowCheckedModeBanner: false,
       title: 'IR Blaster',
       theme: AppTheme.lightTheme,

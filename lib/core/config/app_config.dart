@@ -93,6 +93,10 @@ class AppConfig {
   static String getMqttWifiTopic(String deviceId) =>
       '$mqttTopic/$deviceId/wifi';
 
+  /// IR learn and clear control topic (e.g. <mqttTopic>/<deviceId>/ir_learn).
+  static String getMqttIrLearnTopic(String deviceId) =>
+      '$mqttTopic/$deviceId/ir_learn';
+
   // ── Legacy getters (for backward compatibility) ──────────────────────
   static String get mqttTopic {
     final cachedTopic = MqttConfigService.cached?.topic;
@@ -103,7 +107,11 @@ class AppConfig {
     if (envTopic != null && envTopic.isNotEmpty) {
       return envTopic;
     }
-    return mqttUsername;
+    final user = mqttUsername;
+    if (user.isNotEmpty) {
+      return user;
+    }
+    return 'testir';
   }
 
   static String get mqttControlTopic =>

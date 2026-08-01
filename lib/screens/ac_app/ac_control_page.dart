@@ -89,6 +89,7 @@ class _ACControlPageState extends State<ACControlPage>
   bool _lightOn = true;
   bool _swingV = false;
   bool _swingH = false;
+  bool _isAutomated = false;
 
   // Air Quality mocks (dynamically stable around premium look values)
   final int _tvoc = 0;
@@ -156,6 +157,9 @@ class _ACControlPageState extends State<ACControlPage>
     _userTempOverride = false;
     _isConnected = _mqtt.isConnected;
 
+    final prefs = await SharedPreferences.getInstance();
+    final bool localAuto = prefs.getBool('auto_enabled') ?? false;
+
     // Load initial values from the last known state of this device if available
     final initial = _mqtt.getLastStateFor(_activeDeviceId) ??
         _mqtt.getLastStateFor(_activeDeviceImei) ??
@@ -179,6 +183,7 @@ class _ACControlPageState extends State<ACControlPage>
       _humidity = initial.humidity;
       _irOnLearned = initial.irOnLearned;
       _irOffLearned = initial.irOffLearned;
+      _isAutomated = localAuto || initial.automate;
       if (initial.wifiSsid.isNotEmpty) {
         _wifiSsid = initial.wifiSsid;
       }
@@ -275,6 +280,8 @@ class _ACControlPageState extends State<ACControlPage>
         _humidity = state.humidity;
         _irOnLearned = state.irOnLearned;
         _irOffLearned = state.irOffLearned;
+        // Keep automation active if either telemetry or local configuration states it's enabled
+        _isAutomated = state.automate || (prefs.getBool('auto_enabled') ?? _isAutomated);
 
         if (_currentTemp > 0) {
           final logMsg =
@@ -347,6 +354,14 @@ class _ACControlPageState extends State<ACControlPage>
         _showSnack('Command rejected: device not active', AppColors.offline);
       } else if (resp.type == SirisResponseType.cmdError) {
         _showSnack('Command error: ${resp.detail}', AppColors.offline);
+      } else if (resp.type == SirisResponseType.automateSet) {
+        final isAuto = resp.detail == 'ON';
+        setState(() {
+          _isAutomated = isAuto;
+        });
+        _showSnack('Automation turned ${resp.detail}', isAuto ? AppColors.online : AppColors.offline);
+      } else if (resp.type == SirisResponseType.automateError) {
+        _showSnack('Automation error: ${resp.detail}', AppColors.offline);
       } else if (resp.type == SirisResponseType.wifiPrimarySet) {
         _showSnack('Primary WiFi saved: ${resp.detail}', AppColors.online);
       } else if (resp.type == SirisResponseType.wifiSecondarySet) {
@@ -2401,7 +2416,7 @@ class _ACControlPageState extends State<ACControlPage>
                         _buildDeviceInfoCard(
                             cardColor, textColor, subtitleColor, isDark),
 
-                        // 2. Air Quality metrics
+                        // 2. Air Quality metrics (CO2 & AQI)
                         _buildAirQualityMetrics(
                             cardColor, textColor, subtitleColor, isDark),
 
@@ -2697,19 +2712,6 @@ class _ACControlPageState extends State<ACControlPage>
     return Row(
       children: [
         _buildAirMetricCard(
-          icon: Icons.air_rounded,
-          title: 'TVOC',
-          value: '$_tvoc ppb',
-          accentColor: const Color(0xFFE11D48),
-          bgLight: const Color(0xFFFFF1F2),
-          bgDark: const Color(0xFF881337),
-          borderLight: const Color(0xFFFECDD3),
-          borderDark: const Color(0xFF9F1239),
-          activeSegments: 3,
-          isDark: isDark,
-        ),
-        const SizedBox(width: 12),
-        _buildAirMetricCard(
           icon: Icons.co2_rounded,
           title: 'CO₂',
           value: '$_co2 ppm',
@@ -2864,52 +2866,94 @@ class _ACControlPageState extends State<ACControlPage>
     final color = _isPowerOn ? AppColors.coolBlue : AppColors.textHint;
     return GestureDetector(
       onTap: _togglePower,
-      child: Container(
+      child: SizedBox(
         width: 170,
         height: 170,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: isDark ? AppColors.surfaceDark : Colors.white,
-          border: Border.all(
-            color: color.withOpacity(0.12),
-            width: 6,
+        child: AnimatedBuilder(
+          animation: _pulseCtrl,
+          builder: (context, child) {
+            final double pulseVal = _isPowerOn ? _pulseCtrl.value : 0.0;
+            return Stack(
+              alignment: Alignment.center,
+              clipBehavior: Clip.none,
+              children: [
+                // Outer breathing aura ring (only when ON) - Positioned to prevent affecting layout flow
+                if (_isPowerOn)
+                  Positioned(
+                    width: 170 + (pulseVal * 24),
+                    height: 170 + (pulseVal * 24),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: color.withOpacity(0.25 * (1.0 - pulseVal)),
+                          width: 1.5 + (pulseVal * 2.5),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: color.withOpacity(0.12 * (1.0 - pulseVal)),
+                            blurRadius: 12 + (pulseVal * 12),
+                            spreadRadius: 2 + (pulseVal * 4),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                // Main Dial Container
+                Container(
+                  width: 170,
+                  height: 170,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isDark ? AppColors.surfaceDark : Colors.white,
+                    border: Border.all(
+                      color: _isPowerOn
+                          ? color.withOpacity(0.15 + pulseVal * 0.15)
+                          : color.withOpacity(0.12),
+                      width: 6,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withOpacity(0.08 + (pulseVal * 0.12)),
+                        blurRadius: 16.0 + (pulseVal * 16.0),
+                        spreadRadius: 2.0 + (pulseVal * 6.0),
+                      ),
+                      BoxShadow(
+                        color: isDark ? Colors.black38 : Colors.black.withOpacity(0.04),
+                        blurRadius: 10,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: child,
+                ),
+              ],
+            );
+          },
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '$_setTemp°',
+                style: GoogleFonts.outfit(
+                  fontSize: 56,
+                  fontWeight: FontWeight.w800,
+                  color: textColor,
+                  height: 1.0,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _isPowerOn ? 'TURN OFF' : 'TURN ON',
+                style: GoogleFonts.outfit(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: _isPowerOn ? AppColors.primary : AppColors.offline,
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ],
           ),
-          boxShadow: [
-            BoxShadow(
-              color: color.withOpacity(0.10),
-              blurRadius: 24,
-              spreadRadius: 4,
-            ),
-            BoxShadow(
-              color: isDark ? Colors.black38 : Colors.black.withOpacity(0.04),
-              blurRadius: 10,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              '$_setTemp°',
-              style: GoogleFonts.outfit(
-                fontSize: 56,
-                fontWeight: FontWeight.w800,
-                color: textColor,
-                height: 1.0,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              _isPowerOn ? 'TURN OFF' : 'TURN ON',
-              style: GoogleFonts.outfit(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                color: _isPowerOn ? AppColors.primary : AppColors.offline,
-                letterSpacing: 0.8,
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -3107,13 +3151,15 @@ class _ACControlPageState extends State<ACControlPage>
     return Row(
       children: [
         _buildBottomActionItem(
-          icon: Icons.timer_outlined,
-          label: 'Timer',
-          color: AppColors.coolBlue,
-          bg: isDark
-              ? AppColors.coolBlue.withOpacity(0.12)
-              : const Color(0xFFEFF6FF),
-          onTap: () => _showTimerDialog(context, isDark),
+          icon: _isAutomated ? Icons.smart_toy_rounded : Icons.smart_toy_outlined,
+          label: _isAutomated ? 'Automating' : 'Automate',
+          color: _isAutomated ? AppColors.online : AppColors.coolBlue,
+          bg: _isAutomated
+              ? AppColors.online.withOpacity(0.12)
+              : (isDark
+                  ? AppColors.coolBlue.withOpacity(0.12)
+                  : const Color(0xFFEFF6FF)),
+          onTap: () => _showAutomationDialog(context, isDark),
           isDark: isDark,
         ),
         const SizedBox(width: 12),
@@ -3166,6 +3212,181 @@ class _ACControlPageState extends State<ACControlPage>
           ),
         ),
       ),
+    );
+  }
+
+  void _showAutomationDialog(BuildContext context, bool isDark) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            return Container(
+              decoration: BoxDecoration(
+                color: isDark ? AppColors.surfaceDark : Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white24 : Colors.black12,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Smart Automation',
+                        style: GoogleFonts.outfit(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : AppColors.textPrimary,
+                        ),
+                      ),
+                      Switch(
+                        value: _isAutomated,
+                        activeColor: AppColors.primary,
+                        onChanged: (value) async {
+                          setModalState(() {
+                            _isAutomated = value;
+                          });
+                          setState(() {
+                            _isAutomated = value;
+                          });
+                          _addLog('Automation ${value ? 'ENABLED' : 'DISABLED'}', AppColors.primary);
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.setBool('auto_enabled', value);
+                          if (value) {
+                            _mqtt.enableAutomation();
+                          } else {
+                            _mqtt.disableAutomation();
+                          }
+                          _showSnack(
+                            'Smart Automation ${value ? 'Enabled' : 'Disabled'}',
+                            value ? AppColors.online : AppColors.offline,
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Let the IR Blaster adjust your AC settings intelligently based on room parameters to optimize comfort and save energy.',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      height: 1.4,
+                      color: isDark ? Colors.white54 : Colors.black54,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Divider(color: isDark ? AppColors.dividerDark : AppColors.divider),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Automation Triggers',
+                    style: GoogleFonts.outfit(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white70 : AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildAutomationTriggerItem(
+                    icon: Icons.thermostat_rounded,
+                    title: 'Temperature Threshold',
+                    description: 'Turn off AC when room temp drops below 22°C',
+                    enabled: _isAutomated,
+                    isDark: isDark,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildAutomationTriggerItem(
+                    icon: Icons.motion_photos_on_rounded,
+                    title: 'Motion Sensing',
+                    description: 'Turn off AC when room is empty for 15 minutes',
+                    enabled: _isAutomated,
+                    isDark: isDark,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildAutomationTriggerItem(
+                    icon: Icons.bolt_rounded,
+                    title: 'Eco Mode Optimization',
+                    description: 'Adjust temperature setpoint based on energy cost',
+                    enabled: _isAutomated,
+                    isDark: isDark,
+                  ),
+                  const SizedBox(height: 24),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildAutomationTriggerItem({
+    required IconData icon,
+    required String title,
+    required String description,
+    required bool enabled,
+    required bool isDark,
+  }) {
+    final titleColor = enabled
+        ? (isDark ? Colors.white : AppColors.textPrimary)
+        : (isDark ? Colors.white30 : Colors.black38);
+    final descColor = enabled
+        ? (isDark ? Colors.white54 : Colors.black54)
+        : (isDark ? Colors.white24 : Colors.black26);
+    final iconColor = enabled ? AppColors.primary : (isDark ? Colors.white24 : Colors.black26);
+
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: enabled
+                ? AppColors.primary.withOpacity(0.1)
+                : (isDark ? Colors.white.withOpacity(0.03) : Colors.black.withOpacity(0.03)),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: iconColor, size: 20),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: titleColor,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                description,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  color: descColor,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

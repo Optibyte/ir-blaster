@@ -2,13 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 import 'package:ir_blaster_ac/core/config/app_config.dart';
 import 'package:ir_blaster_ac/core/services/auth_service.dart';
 import 'package:ir_blaster_ac/core/services/mqtt_config_service.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
-import 'dart:typed_data';
 
 /// Represents the live device state parsed from the SIRIS JSON snapshot.
 class SirisDeviceState {
@@ -28,6 +28,7 @@ class SirisDeviceState {
   final String time;
   final String primarySsid;
   final String secondarySsid;
+  final bool automate; // Smart Automation state
  
   // Schedule slots
   final String schOn1;
@@ -72,6 +73,7 @@ class SirisDeviceState {
     required this.lunchOff,
     this.primarySsid = '',
     this.secondarySsid = '',
+    this.automate = false,
   });
 
   SirisDeviceState copyWith({
@@ -103,6 +105,7 @@ class SirisDeviceState {
     String? schOff5,
     String? lunchOn,
     String? lunchOff,
+    bool? automate,
   }) {
     return SirisDeviceState(
       deviceId: deviceId ?? this.deviceId,
@@ -133,6 +136,7 @@ class SirisDeviceState {
       schOff5: schOff5 ?? this.schOff5,
       lunchOn: lunchOn ?? this.lunchOn,
       lunchOff: lunchOff ?? this.lunchOff,
+      automate: automate ?? this.automate,
     );
   }
 
@@ -187,6 +191,7 @@ class SirisDeviceState {
       lunchOff: (root['lunch_off'] ?? payload['lunch_off'] ?? 'DISABLED').toString(),
       primarySsid: (root['wifi_primary_ssid'] ?? root['primary_ssid'] ?? payload['wifi_primary_ssid'] ?? payload['primary_ssid'] ?? '').toString(),
       secondarySsid: (root['wifi_secondary_ssid'] ?? root['secondary_ssid'] ?? payload['wifi_secondary_ssid'] ?? payload['secondary_ssid'] ?? '').toString(),
+      automate: (root['automate'] ?? payload['automate']) == true,
     );
   }
 
@@ -217,6 +222,14 @@ enum SirisResponseType {
   wifiInfo,
   wifiError,
   wifiRollback,
+  automateSet,
+  automateError,
+  irLearnWaiting,
+  irLearnSaved,
+  irLearnCleared,
+  irLearnStopped,
+  irLearnStatus,
+  irLearnError,
 }
 
 /// Parsed command response from the device.
@@ -369,7 +382,7 @@ class MqttService extends ChangeNotifier {
     }
   }
 
-  void _updateLocalBluetoothState({String? ac, int? setTemp, int? currentTemp}) {
+  void _updateLocalBluetoothState({String? ac, int? setTemp, int? currentTemp, bool? automate}) {
     if (_deviceId.isEmpty) return;
     final lowerId = _deviceId.toLowerCase();
     final existingState = _deviceStates[lowerId] ?? lastState ?? SirisDeviceState(
@@ -399,11 +412,13 @@ class MqttService extends ChangeNotifier {
       schOff5: 'DISABLED',
       lunchOn: 'DISABLED',
       lunchOff: 'DISABLED',
+      automate: false,
     );
     final newState = existingState.copyWith(
       ac: ac,
       setTemp: setTemp,
       currentTemp: currentTemp,
+      automate: automate,
     );
     _deviceStates[lowerId] = newState;
     _recordLastReceivedTime(lowerId);
@@ -636,6 +651,10 @@ class MqttService extends ChangeNotifier {
       final statusTopic = AppConfig.getMqttStatusTopic(_deviceId);
       _client!.subscribe(statusTopic, MqttQos.atLeastOnce);
       debugPrint('📨 [MQTT] Subscribed to: $statusTopic');
+
+      final irLearnTopic = AppConfig.getMqttIrLearnTopic(_deviceId);
+      _client!.subscribe(irLearnTopic, MqttQos.atLeastOnce);
+      debugPrint('📨 [MQTT] Subscribed to: $irLearnTopic');
     }
   }
 
@@ -674,6 +693,28 @@ class MqttService extends ChangeNotifier {
     }
   }
 
+  String? _extractEmbeddedIrResponse(dynamic obj) {
+    if (obj == null) return null;
+    if (obj is String) {
+      if (obj.toUpperCase().contains('IR_LEARN_')) {
+        return obj;
+      }
+      return null;
+    }
+    if (obj is Map) {
+      for (final value in obj.values) {
+        final res = _extractEmbeddedIrResponse(value);
+        if (res != null) return res;
+      }
+    } else if (obj is List) {
+      for (final item in obj) {
+        final res = _extractEmbeddedIrResponse(item);
+        if (res != null) return res;
+      }
+    }
+    return null;
+  }
+
   void _handleJsonPayload(String payload) {
     try {
       // Fix malformed JSON
@@ -685,12 +726,16 @@ class MqttService extends ChangeNotifier {
 
       final json = jsonDecode(safePayload);
 
+      // Check if JSON contains an embedded IR Learn string response (e.g. from SSE/API bridge)
+      final embeddedIr = _extractEmbeddedIrResponse(json);
+      if (embeddedIr != null && embeddedIr.isNotEmpty) {
+        debugPrint('📩 [MQTT/SSE] Extracted embedded IR response: $embeddedIr');
+        _handleStringResponse(embeddedIr);
+      }
+
       // Check if this is a stream control/connection handshake message (no telemetry data payload)
       if (json['data'] == null && (json['message'] != null || json['cacheStatus'] != null)) {
         debugPrint('ℹ️ [SSE] Stream control message: ${json['message']} (cacheStatus: ${json['cacheStatus']})');
-        // Do NOT push INACTIVE state here. The SSE handshake is a stream control
-        // message and does not reflect the physical device's WiFi/online state.
-        // Online status is driven by actual telemetry data and the watchdog timer.
         return;
       }
 
@@ -810,12 +855,16 @@ class MqttService extends ChangeNotifier {
           _resetSseWatchdog(companyId, deviceId, imei);
           if (line.startsWith('data:')) {
             final dataContent = line.substring(5).trim();
-            if (dataContent.isNotEmpty && dataContent.startsWith('{')) {
+            if (dataContent.isNotEmpty) {
               debugPrint('📩 [SSE] Received data: $dataContent');
               _sseLastDataTime = DateTime.now();
               _sseLastPayload = dataContent;
               notifyListeners();
-              _handleJsonPayload(dataContent);
+              if (dataContent.startsWith('{')) {
+                _handleJsonPayload(dataContent);
+              } else {
+                _handleStringResponse(dataContent);
+              }
             }
           }
         }, onError: (e) {
@@ -859,7 +908,7 @@ class MqttService extends ChangeNotifier {
     }
   }
 
-  void _updateCachedDeviceState(String deviceId, {String? ac, int? setTemp, int? currentTemp}) {
+  void _updateCachedDeviceState(String deviceId, {String? ac, int? setTemp, int? currentTemp, bool? automate}) {
     if (deviceId.isEmpty) return;
 
     final String lookupId = deviceId.toLowerCase();
@@ -888,6 +937,7 @@ class MqttService extends ChangeNotifier {
           lunchOn: 'DISABLED', lunchOff: 'DISABLED',
           primarySsid: '',
           secondarySsid: '',
+          automate: false,
         );
 
     final updated = existing.copyWith(
@@ -895,6 +945,7 @@ class MqttService extends ChangeNotifier {
       ac: ac ?? existing.ac,
       setTemp: setTemp ?? existing.setTemp,
       currentTemp: currentTemp ?? existing.currentTemp,
+      automate: automate ?? existing.automate,
       status: 'ACTIVE',
       time: DateTime.now().toString(),
     );
@@ -917,7 +968,6 @@ class MqttService extends ChangeNotifier {
   }
 
   void _handleStringResponse(String payload) {
-    final prefix = AppConfig.mqttPayloadPrefix;
     final upper = payload.toUpperCase();
 
     String? responseDeviceId;
@@ -953,6 +1003,30 @@ class MqttService extends ChangeNotifier {
       response = SirisResponse(
         type: SirisResponseType.acOffDone,
         rawPayload: payload,
+      );
+    } else if (upper.contains('AUTO_OFF_DONE') || upper.contains('AUTO_OFF') || upper.contains('AUTO_DISABLE')) {
+      if (responseDeviceId != null) {
+        _updateCachedDeviceState(responseDeviceId, automate: false);
+      }
+      response = SirisResponse(
+        type: SirisResponseType.automateSet,
+        rawPayload: payload,
+        detail: 'OFF',
+      );
+    } else if (upper.contains('AUTO_ON_DONE') || upper.contains('AUTO_ON') || upper.contains('AUTO_CFG') || upper.contains('AUTO')) {
+      if (responseDeviceId != null) {
+        _updateCachedDeviceState(responseDeviceId, automate: true);
+      }
+      response = SirisResponse(
+        type: SirisResponseType.automateSet,
+        rawPayload: payload,
+        detail: 'ON',
+      );
+    } else if (upper.contains('AUTO_ERR')) {
+      response = SirisResponse(
+        type: SirisResponseType.automateError,
+        rawPayload: payload,
+        detail: payload,
       );
     } else if (upper.contains('TEMP_SET')) {
       final detail =
@@ -1104,6 +1178,7 @@ class MqttService extends ChangeNotifier {
           lunchOn: 'DISABLED', lunchOff: 'DISABLED',
           primarySsid: '',
           secondarySsid: '',
+          automate: false,
         );
 
         final newState = baseState.copyWith(
@@ -1135,6 +1210,47 @@ class MqttService extends ChangeNotifier {
       } catch (e) {
         debugPrint('❌ Error parsing WIFI_INFO: $e');
       }
+    } else if (upper.contains('IR_LEARN_WAITING')) {
+      final detail = payload.replaceFirst(RegExp(r'.*IR_LEARN_WAITING:?', caseSensitive: false), '').trim();
+      response = SirisResponse(
+        type: SirisResponseType.irLearnWaiting,
+        rawPayload: payload,
+        detail: detail,
+      );
+    } else if (upper.contains('IR_LEARN_SAVED')) {
+      final detail = payload.replaceFirst(RegExp(r'.*IR_LEARN_SAVED:?', caseSensitive: false), '').trim();
+      response = SirisResponse(
+        type: SirisResponseType.irLearnSaved,
+        rawPayload: payload,
+        detail: detail,
+      );
+    } else if (upper.contains('IR_LEARN_CLEARED')) {
+      final detail = payload.replaceFirst(RegExp(r'.*IR_LEARN_CLEARED:?', caseSensitive: false), '').trim();
+      response = SirisResponse(
+        type: SirisResponseType.irLearnCleared,
+        rawPayload: payload,
+        detail: detail,
+      );
+    } else if (upper.contains('IR_LEARN_STOPPED')) {
+      response = SirisResponse(
+        type: SirisResponseType.irLearnStopped,
+        rawPayload: payload,
+        detail: 'STOPPED',
+      );
+    } else if (upper.contains('IR_LEARN_STATUS')) {
+      final detail = payload.replaceFirst(RegExp(r'.*IR_LEARN_STATUS:?', caseSensitive: false), '').trim();
+      response = SirisResponse(
+        type: SirisResponseType.irLearnStatus,
+        rawPayload: payload,
+        detail: detail,
+      );
+    } else if (upper.contains('IR_LEARN_ERR')) {
+      final detail = payload.replaceFirst(RegExp(r'.*IR_LEARN_ERR:?', caseSensitive: false), '').trim();
+      response = SirisResponse(
+        type: SirisResponseType.irLearnError,
+        rawPayload: payload,
+        detail: detail,
+      );
     } else if (upper.contains('WIFI_ROLLBACK')) {
       final detail = payload.split(':').last.trim();
       response = SirisResponse(
@@ -1162,28 +1278,84 @@ class MqttService extends ChangeNotifier {
   // ── Publish Methods (RULE 1: retain=false, RULE 2: plain text only) ──
 
   /// Publish a raw message to a topic. Retain is ALWAYS false.
-  bool _publish(String topic, String message) {
-    if (_client == null ||
-        _client!.connectionStatus!.state != MqttConnectionState.connected) {
-      debugPrint('⚠️ [MQTT] Cannot publish — not connected. Topic: $topic, Message: $message');
-      return false;
+  Future<bool> _publish(String topic, String message) async {
+    bool published = false;
+    if (_client != null &&
+        _client!.connectionStatus?.state == MqttConnectionState.connected) {
+      try {
+        final builder = MqttClientPayloadBuilder();
+        builder.addString(message);
+        _client!.publishMessage(topic, MqttQos.atLeastOnce, builder.payload!,
+            retain: false);
+        debugPrint('📤 [MQTT] Published via socket to $topic: $message');
+        published = true;
+      } catch (e) {
+        debugPrint('⚠️ [MQTT] Socket publish error: $e');
+      }
     }
 
-    final builder = MqttClientPayloadBuilder();
-    builder.addString(message);
-    _client!.publishMessage(topic, MqttQos.atLeastOnce, builder.payload!,
-        retain: false);
-    debugPrint('📤 [MQTT] Published to $topic: $message');
-    return true;
+    // HTTP POST fallback if direct MQTT socket is not connected
+    if (!published) {
+      try {
+        final token = await AuthService.getCookieHeader();
+        final url = '${AppConfig.provisionBaseUrl}/mqtt/publish';
+        final resp = await http.post(
+          Uri.parse(url),
+          headers: {
+            'Content-Type': 'application/json',
+            if (token != null) 'Authorization': 'Bearer $token',
+            if (token != null) 'Cookie': 'auth_token=$token',
+          },
+          body: jsonEncode({
+            'topic': topic,
+            'payload': message,
+            'deviceId': _deviceId,
+          }),
+        ).timeout(const Duration(seconds: 4));
+
+        if (resp.statusCode == 200) {
+          debugPrint('📤 [HTTP/MQTT] Published via HTTP proxy to $topic: $message');
+          published = true;
+        } else {
+          debugPrint('⚠️ [HTTP/MQTT] Proxy return code ${resp.statusCode}: ${resp.body}');
+        }
+      } catch (e) {
+        debugPrint('⚠️ [HTTP/MQTT] HTTP publish fallback error: $e');
+      }
+    }
+
+    return published;
   }
 
-  /// Send a custom control command to the control topic.
-  void sendControlCommand(String command) {
+  /// Send a custom control command to the ir_learn and control topics (e.g. LEARN_*, CLEAR_*).
+  Future<void> sendControlCommand(String command) async {
+    debugPrint('📡 [MQTT] Sending IR Learn/Control command: $command for device: $_deviceId');
     if (isBluetoothConnected) {
+      sendBluetoothCommand('SEND:$command');
       sendBluetoothCommand(command);
     } else {
-      final topic = AppConfig.getMqttControlTopic(_deviceId);
-      _publish(topic, command);
+      // 1. PRIMARY: ir_learn topic (e.g. testir/Sustainabyte_ITir/ir_learn)
+      final irLearnTopic = AppConfig.getMqttIrLearnTopic(_deviceId);
+      await _publish(irLearnTopic, command);
+
+      // 2. Direct device id ir_learn topic
+      if (_deviceId.isNotEmpty) {
+        final directIrTopic = '$_deviceId/ir_learn';
+        if (directIrTopic != irLearnTopic) {
+          await _publish(directIrTopic, command);
+        }
+      }
+
+      // 3. Fallback control topics
+      final controlTopic = AppConfig.getMqttControlTopic(_deviceId);
+      if (controlTopic != irLearnTopic) {
+        await _publish(controlTopic, command);
+      }
+
+      final altControlTopic = '${AppConfig.mqttTopic}/control';
+      if (altControlTopic != irLearnTopic && altControlTopic != controlTopic) {
+        await _publish(altControlTopic, command);
+      }
     }
   }
 
@@ -1216,6 +1388,26 @@ class MqttService extends ChangeNotifier {
     } else {
       final topic = AppConfig.getMqttControlTopic(_deviceId);
       _publish(topic, 'STATUS');
+    }
+  }
+
+  /// Enable smart automation.
+  void enableAutomation() {
+    if (isBluetoothConnected) {
+      sendBluetoothCommand('SEND:AUTO');
+    } else {
+      final topic = AppConfig.getMqttControlTopic(_deviceId);
+      _publish(topic, 'AUTO');
+    }
+  }
+
+  /// Disable smart automation.
+  void disableAutomation() {
+    if (isBluetoothConnected) {
+      sendBluetoothCommand('SEND:AUTO_OFF');
+    } else {
+      final topic = AppConfig.getMqttControlTopic(_deviceId);
+      _publish(topic, 'AUTO_OFF');
     }
   }
 
@@ -1458,6 +1650,79 @@ class MqttService extends ChangeNotifier {
   void setSecondaryWifiMqtt(String ssid, String password) {
     final wifiTopic = AppConfig.getMqttWifiTopic(_deviceId);
     _publish(wifiTopic, 'SECONDARY:$ssid,$password');
+  }
+
+  // ── IR Learn & Clear Control (v5.1 Protocol) ──────────────────────────
+
+  /// Send LEARN_ON to arm IR receiver for next POWER_ON signal.
+  void learnOn() {
+    sendControlCommand('LEARN_ON');
+  }
+
+  /// Send LEARN_OFF to arm IR receiver for next POWER_OFF signal.
+  void learnOff() {
+    sendControlCommand('LEARN_OFF');
+  }
+
+  /// Send LEARN_UP (16-29°C) to arm IR receiver for that UP step.
+  void learnUp(int temp) {
+    if (temp < 16 || temp > 29) {
+      debugPrint('⚠️ [MQTT] LEARN_UP temperature out of range (16-29): $temp');
+      return;
+    }
+    sendControlCommand('LEARN_UP:$temp');
+  }
+
+  /// Send LEARN_DOWN (17-30°C) to arm IR receiver for that DOWN step.
+  void learnDown(int temp) {
+    if (temp < 17 || temp > 30) {
+      debugPrint('⚠️ [MQTT] LEARN_DOWN temperature out of range (17-30): $temp');
+      return;
+    }
+    sendControlCommand('LEARN_DOWN:$temp');
+  }
+
+  /// Send LEARN_STOP to cancel any in-progress capture.
+  void learnStop() {
+    sendControlCommand('LEARN_STOP');
+  }
+
+  /// Send LEARN_STATUS to report what's learned / missing.
+  void getLearnStatus() {
+    sendControlCommand('LEARN_STATUS');
+  }
+
+  /// Send CLEAR_ON to free RAM + delete /ir/on.bin.
+  void clearOn() {
+    sendControlCommand('CLEAR_ON');
+  }
+
+  /// Send CLEAR_OFF to free RAM + delete /ir/off.bin.
+  void clearOff() {
+    sendControlCommand('CLEAR_OFF');
+  }
+
+  /// Send CLEAR_UP:<16-29> to delete that UP step file.
+  void clearUp(int temp) {
+    if (temp < 16 || temp > 29) {
+      debugPrint('⚠️ [MQTT] CLEAR_UP temperature out of range (16-29): $temp');
+      return;
+    }
+    sendControlCommand('CLEAR_UP:$temp');
+  }
+
+  /// Send CLEAR_DOWN:<17-30> to delete that DOWN step file.
+  void clearDown(int temp) {
+    if (temp < 17 || temp > 30) {
+      debugPrint('⚠️ [MQTT] CLEAR_DOWN temperature out of range (17-30): $temp');
+      return;
+    }
+    sendControlCommand('CLEAR_DOWN:$temp');
+  }
+
+  /// Send CLEAR_ALL to delete ON/OFF, 14 UP and 14 DOWN files (30 deletes total).
+  void clearAll() {
+    sendControlCommand('CLEAR_ALL');
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────
